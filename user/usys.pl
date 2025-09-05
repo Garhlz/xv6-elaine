@@ -1,3 +1,4 @@
+# user/usys.pl
 #!/usr/bin/perl -w
 
 # Generate usys.S, the stubs for syscalls.
@@ -14,7 +15,7 @@ sub entry {
     print " ecall\n";
     print " ret\n";
 }
-	
+# 为每一个系统调用都调用一次 entry 函数, 自动生成它们的汇编代码
 entry("fork");
 entry("exit");
 entry("wait");
@@ -36,3 +37,5 @@ entry("getpid");
 entry("sbrk");
 entry("sleep");
 entry("uptime");
+entry("trace");
+entry("sysinfo");
