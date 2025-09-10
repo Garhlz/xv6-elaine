@@ -37,4 +37,6 @@ entry("sbrk");
 entry("sleep");
 entry("uptime");
 entry("connect");
+
+# hw3 已经添加了
 entry("pgaccess");

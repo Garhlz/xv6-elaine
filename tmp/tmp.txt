@@ -1,0 +1,1127 @@
+
+//kernel/kalloc.c
+// Physical memory allocator, for user processes,
+// kernel stacks, page-table pages,
+// and pipe buffers. Allocates whole 4096-byte pages.
+
+#include "types.h"
+#include "param.h"
+#include "memlayout.h"
+#include "spinlock.h"
+#include "riscv.h"
+#include "defs.h"
+
+void freerange(void *pa_start, void *pa_end);
+
+extern char end[]; // first address after kernel.
+                   // defined by kernel.ld.
+
+struct run {
+  struct run *next;
+};
+
+struct {
+  struct spinlock lock;
+  struct run *freelist;
+} kmem;
+
+void
+kinit()
+{
+  initlock(&kmem.lock, "kmem");
+  freerange(end, (void*)PHYSTOP);
+}
+
+void
+freerange(void *pa_start, void *pa_end)
+{
+  char *p;
+  p = (char*)PGROUNDUP((uint64)pa_start);
+  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+    kfree(p);
+}
+
+// Free the page of physical memory pointed at by v,
+// which normally should have been returned by a
+// call to kalloc().  (The exception is when
+// initializing the allocator; see kinit above.)
+void
+kfree(void *pa)
+{
+  struct run *r;
+
+  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+    panic("kfree");
+
+  // Fill with junk to catch dangling refs.
+  memset(pa, 1, PGSIZE);
+
+  r = (struct run*)pa;
+
+  acquire(&kmem.lock);
+  r->next = kmem.freelist;
+  kmem.freelist = r;
+  release(&kmem.lock);
+}
+
+// Allocate one 4096-byte page of physical memory.
+// Returns a pointer that the kernel can use.
+// Returns 0 if the memory cannot be allocated.
+void *
+kalloc(void)
+{
+  struct run *r;
+
+  acquire(&kmem.lock);
+  r = kmem.freelist;
+  if(r)
+    kmem.freelist = r->next;
+  release(&kmem.lock);
+
+  if(r)
+    memset((char*)r, 5, PGSIZE); // fill with junk
+  return (void*)r;
+}
+
+
+// kernel/memlayout.h 
+// Physical memory layout
+
+// qemu -machine virt is set up like this,
+// based on qemu's hw/riscv/virt.c:
+//
+// 00001000 -- boot ROM, provided by qemu
+// 02000000 -- CLINT
+// 0C000000 -- PLIC
+// 10000000 -- uart0 
+// 10001000 -- virtio disk 
+// 80000000 -- boot ROM jumps here in machine mode
+//             -kernel loads the kernel here
+// unused RAM after 80000000.
+
+// the kernel uses physical memory thus:
+// 80000000 -- entry.S, then kernel text and data
+// end -- start of kernel page allocation area
+// PHYSTOP -- end RAM used by the kernel
+
+// qemu puts UART registers here in physical memory.
+#define UART0 0x10000000L
+#define UART0_IRQ 10
+
+// virtio mmio interface
+#define VIRTIO0 0x10001000
+#define VIRTIO0_IRQ 1
+
+#ifdef LAB_NET
+#define E1000_IRQ 33
+#endif
+
+// core local interruptor (CLINT), which contains the timer.
+#define CLINT 0x2000000L
+#define CLINT_MTIMECMP(hartid) (CLINT + 0x4000 + 8*(hartid))
+#define CLINT_MTIME (CLINT + 0xBFF8) // cycles since boot.
+
+// qemu puts platform-level interrupt controller (PLIC) here.
+#define PLIC 0x0c000000L
+#define PLIC_PRIORITY (PLIC + 0x0)
+#define PLIC_PENDING (PLIC + 0x1000)
+#define PLIC_MENABLE(hart) (PLIC + 0x2000 + (hart)*0x100)
+#define PLIC_SENABLE(hart) (PLIC + 0x2080 + (hart)*0x100)
+#define PLIC_MPRIORITY(hart) (PLIC + 0x200000 + (hart)*0x2000)
+#define PLIC_SPRIORITY(hart) (PLIC + 0x201000 + (hart)*0x2000)
+#define PLIC_MCLAIM(hart) (PLIC + 0x200004 + (hart)*0x2000)
+#define PLIC_SCLAIM(hart) (PLIC + 0x201004 + (hart)*0x2000)
+
+// the kernel expects there to be RAM
+// for use by the kernel and user pages
+// from physical address 0x80000000 to PHYSTOP.
+#define KERNBASE 0x80000000L
+#define PHYSTOP (KERNBASE + 128*1024*1024)
+
+// map the trampoline page to the highest address,
+// in both user and kernel space.
+#define TRAMPOLINE (MAXVA - PGSIZE)
+
+// map kernel stacks beneath the trampoline,
+// each surrounded by invalid guard pages.
+#define KSTACK(p) (TRAMPOLINE - (p)*2*PGSIZE - 3*PGSIZE)
+
+// User memory layout.
+// Address zero first:
+//   text
+//   original data and bss
+//   fixed-size stack
+//   expandable heap
+//   ...
+//   USYSCALL (shared with kernel)
+//   TRAPFRAME (p->trapframe, used by the trampoline)
+//   TRAMPOLINE (the same page as in the kernel)
+#define TRAPFRAME (TRAMPOLINE - PGSIZE)
+#ifdef LAB_PGTBL
+#define USYSCALL (TRAPFRAME - PGSIZE)
+
+struct usyscall {
+  int pid;  // Process ID
+};
+#endif
+
+
+kernel/rescv.h 
+// which hart (core) is this?
+static inline uint64
+r_mhartid()
+{
+  uint64 x;
+  asm volatile("csrr %0, mhartid" : "=r" (x) );
+  return x;
+}
+
+// Machine Status Register, mstatus
+
+#define MSTATUS_MPP_MASK (3L << 11) // previous mode.
+#define MSTATUS_MPP_M (3L << 11)
+#define MSTATUS_MPP_S (1L << 11)
+#define MSTATUS_MPP_U (0L << 11)
+#define MSTATUS_MIE (1L << 3)    // machine-mode interrupt enable.
+
+static inline uint64
+r_mstatus()
+{
+  uint64 x;
+  asm volatile("csrr %0, mstatus" : "=r" (x) );
+  return x;
+}
+
+static inline void 
+w_mstatus(uint64 x)
+{
+  asm volatile("csrw mstatus, %0" : : "r" (x));
+}
+
+// machine exception program counter, holds the
+// instruction address to which a return from
+// exception will go.
+static inline void 
+w_mepc(uint64 x)
+{
+  asm volatile("csrw mepc, %0" : : "r" (x));
+}
+
+// Supervisor Status Register, sstatus
+
+#define SSTATUS_SPP (1L << 8)  // Previous mode, 1=Supervisor, 0=User
+#define SSTATUS_SPIE (1L << 5) // Supervisor Previous Interrupt Enable
+#define SSTATUS_UPIE (1L << 4) // User Previous Interrupt Enable
+#define SSTATUS_SIE (1L << 1)  // Supervisor Interrupt Enable
+#define SSTATUS_UIE (1L << 0)  // User Interrupt Enable
+
+static inline uint64
+r_sstatus()
+{
+  uint64 x;
+  asm volatile("csrr %0, sstatus" : "=r" (x) );
+  return x;
+}
+
+static inline void 
+w_sstatus(uint64 x)
+{
+  asm volatile("csrw sstatus, %0" : : "r" (x));
+}
+
+// Supervisor Interrupt Pending
+static inline uint64
+r_sip()
+{
+  uint64 x;
+  asm volatile("csrr %0, sip" : "=r" (x) );
+  return x;
+}
+
+static inline void 
+w_sip(uint64 x)
+{
+  asm volatile("csrw sip, %0" : : "r" (x));
+}
+
+// Supervisor Interrupt Enable
+#define SIE_SEIE (1L << 9) // external
+#define SIE_STIE (1L << 5) // timer
+#define SIE_SSIE (1L << 1) // software
+static inline uint64
+r_sie()
+{
+  uint64 x;
+  asm volatile("csrr %0, sie" : "=r" (x) );
+  return x;
+}
+
+static inline void 
+w_sie(uint64 x)
+{
+  asm volatile("csrw sie, %0" : : "r" (x));
+}
+
+// Machine-mode Interrupt Enable
+#define MIE_MEIE (1L << 11) // external
+#define MIE_MTIE (1L << 7)  // timer
+#define MIE_MSIE (1L << 3)  // software
+static inline uint64
+r_mie()
+{
+  uint64 x;
+  asm volatile("csrr %0, mie" : "=r" (x) );
+  return x;
+}
+
+static inline void 
+w_mie(uint64 x)
+{
+  asm volatile("csrw mie, %0" : : "r" (x));
+}
+
+// supervisor exception program counter, holds the
+// instruction address to which a return from
+// exception will go.
+static inline void 
+w_sepc(uint64 x)
+{
+  asm volatile("csrw sepc, %0" : : "r" (x));
+}
+
+static inline uint64
+r_sepc()
+{
+  uint64 x;
+  asm volatile("csrr %0, sepc" : "=r" (x) );
+  return x;
+}
+
+// Machine Exception Delegation
+static inline uint64
+r_medeleg()
+{
+  uint64 x;
+  asm volatile("csrr %0, medeleg" : "=r" (x) );
+  return x;
+}
+
+static inline void 
+w_medeleg(uint64 x)
+{
+  asm volatile("csrw medeleg, %0" : : "r" (x));
+}
+
+// Machine Interrupt Delegation
+static inline uint64
+r_mideleg()
+{
+  uint64 x;
+  asm volatile("csrr %0, mideleg" : "=r" (x) );
+  return x;
+}
+
+static inline void 
+w_mideleg(uint64 x)
+{
+  asm volatile("csrw mideleg, %0" : : "r" (x));
+}
+
+// Supervisor Trap-Vector Base Address
+// low two bits are mode.
+static inline void 
+w_stvec(uint64 x)
+{
+  asm volatile("csrw stvec, %0" : : "r" (x));
+}
+
+static inline uint64
+r_stvec()
+{
+  uint64 x;
+  asm volatile("csrr %0, stvec" : "=r" (x) );
+  return x;
+}
+
+// Machine-mode interrupt vector
+static inline void 
+w_mtvec(uint64 x)
+{
+  asm volatile("csrw mtvec, %0" : : "r" (x));
+}
+
+static inline void
+w_pmpcfg0(uint64 x)
+{
+  asm volatile("csrw pmpcfg0, %0" : : "r" (x));
+}
+
+static inline void
+w_pmpaddr0(uint64 x)
+{
+  asm volatile("csrw pmpaddr0, %0" : : "r" (x));
+}
+
+// use riscv's sv39 page table scheme.
+#define SATP_SV39 (8L << 60)
+
+#define MAKE_SATP(pagetable) (SATP_SV39 | (((uint64)pagetable) >> 12))
+
+// supervisor address translation and protection;
+// holds the address of the page table.
+static inline void 
+w_satp(uint64 x)
+{
+  asm volatile("csrw satp, %0" : : "r" (x));
+}
+
+static inline uint64
+r_satp()
+{
+  uint64 x;
+  asm volatile("csrr %0, satp" : "=r" (x) );
+  return x;
+}
+
+// Supervisor Scratch register, for early trap handler in trampoline.S.
+static inline void 
+w_sscratch(uint64 x)
+{
+  asm volatile("csrw sscratch, %0" : : "r" (x));
+}
+
+static inline void 
+w_mscratch(uint64 x)
+{
+  asm volatile("csrw mscratch, %0" : : "r" (x));
+}
+
+// Supervisor Trap Cause
+static inline uint64
+r_scause()
+{
+  uint64 x;
+  asm volatile("csrr %0, scause" : "=r" (x) );
+  return x;
+}
+
+// Supervisor Trap Value
+static inline uint64
+r_stval()
+{
+  uint64 x;
+  asm volatile("csrr %0, stval" : "=r" (x) );
+  return x;
+}
+
+// Machine-mode Counter-Enable
+static inline void 
+w_mcounteren(uint64 x)
+{
+  asm volatile("csrw mcounteren, %0" : : "r" (x));
+}
+
+static inline uint64
+r_mcounteren()
+{
+  uint64 x;
+  asm volatile("csrr %0, mcounteren" : "=r" (x) );
+  return x;
+}
+
+// machine-mode cycle counter
+static inline uint64
+r_time()
+{
+  uint64 x;
+  asm volatile("csrr %0, time" : "=r" (x) );
+  return x;
+}
+
+// enable device interrupts
+static inline void
+intr_on()
+{
+  w_sstatus(r_sstatus() | SSTATUS_SIE);
+}
+
+// disable device interrupts
+static inline void
+intr_off()
+{
+  w_sstatus(r_sstatus() & ~SSTATUS_SIE);
+}
+
+// are device interrupts enabled?
+static inline int
+intr_get()
+{
+  uint64 x = r_sstatus();
+  return (x & SSTATUS_SIE) != 0;
+}
+
+static inline uint64
+r_sp()
+{
+  uint64 x;
+  asm volatile("mv %0, sp" : "=r" (x) );
+  return x;
+}
+
+// read and write tp, the thread pointer, which holds
+// this core's hartid (core number), the index into cpus[].
+static inline uint64
+r_tp()
+{
+  uint64 x;
+  asm volatile("mv %0, tp" : "=r" (x) );
+  return x;
+}
+
+static inline void 
+w_tp(uint64 x)
+{
+  asm volatile("mv tp, %0" : : "r" (x));
+}
+
+static inline uint64
+r_ra()
+{
+  uint64 x;
+  asm volatile("mv %0, ra" : "=r" (x) );
+  return x;
+}
+
+// flush the TLB.
+static inline void
+sfence_vma()
+{
+  // the zero, zero means flush all TLB entries.
+  asm volatile("sfence.vma zero, zero");
+}
+
+
+#define PGSIZE 4096 // bytes per page
+#define PGSHIFT 12  // bits of offset within a page
+
+#define PGROUNDUP(sz)  (((sz)+PGSIZE-1) & ~(PGSIZE-1))
+#define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1))
+
+#define PTE_V (1L << 0) // valid
+#define PTE_R (1L << 1)
+#define PTE_W (1L << 2)
+#define PTE_X (1L << 3)
+#define PTE_U (1L << 4) // 1 -> user can access
+
+// shift a physical address to the right place for a PTE.
+#define PA2PTE(pa) ((((uint64)pa) >> 12) << 10)
+
+#define PTE2PA(pte) (((pte) >> 10) << 12)
+
+#define PTE_FLAGS(pte) ((pte) & 0x3FF)
+
+// extract the three 9-bit page table indices from a virtual address.
+#define PXMASK          0x1FF // 9 bits
+#define PXSHIFT(level)  (PGSHIFT+(9*(level)))
+#define PX(level, va) ((((uint64) (va)) >> PXSHIFT(level)) & PXMASK)
+
+// one beyond the highest possible virtual address.
+// MAXVA is actually one bit less than the max allowed by
+// Sv39, to avoid having to sign-extend virtual addresses
+// that have the high bit set.
+#define MAXVA (1L << (9 + 9 + 9 + 12 - 1))
+
+typedef uint64 pte_t;
+typedef uint64 *pagetable_t; // 512 PTEs
+
+// kernel/exec.h 
+#include "types.h"
+#include "param.h"
+#include "memlayout.h"
+#include "riscv.h"
+#include "spinlock.h"
+#include "proc.h"
+#include "defs.h"
+#include "elf.h"
+
+static int loadseg(pde_t *pgdir, uint64 addr, struct inode *ip, uint offset, uint sz);
+
+int
+exec(char *path, char **argv)
+{
+  char *s, *last;
+  int i, off;
+  uint64 argc, sz = 0, sp, ustack[MAXARG], stackbase;
+  struct elfhdr elf;
+  struct inode *ip;
+  struct proghdr ph;
+  pagetable_t pagetable = 0, oldpagetable;
+  struct proc *p = myproc();
+
+  begin_op();
+
+  if((ip = namei(path)) == 0){
+    end_op();
+    return -1;
+  }
+  ilock(ip);
+
+  // Check ELF header
+  if(readi(ip, 0, (uint64)&elf, 0, sizeof(elf)) != sizeof(elf))
+    goto bad;
+  if(elf.magic != ELF_MAGIC)
+    goto bad;
+
+  if((pagetable = proc_pagetable(p)) == 0)
+    goto bad;
+
+  // Load program into memory.
+  for(i=0, off=elf.phoff; i<elf.phnum; i++, off+=sizeof(ph)){
+    if(readi(ip, 0, (uint64)&ph, off, sizeof(ph)) != sizeof(ph))
+      goto bad;
+    if(ph.type != ELF_PROG_LOAD)
+      continue;
+    if(ph.memsz < ph.filesz)
+      goto bad;
+    if(ph.vaddr + ph.memsz < ph.vaddr)
+      goto bad;
+    uint64 sz1;
+    if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz)) == 0)
+      goto bad;
+    sz = sz1;
+    if((ph.vaddr % PGSIZE) != 0)
+      goto bad;
+    if(loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0)
+      goto bad;
+  }
+  iunlockput(ip);
+  end_op();
+  ip = 0;
+
+  p = myproc();
+  uint64 oldsz = p->sz;
+
+  // Allocate two pages at the next page boundary.
+  // Use the second as the user stack.
+  sz = PGROUNDUP(sz);
+  uint64 sz1;
+  if((sz1 = uvmalloc(pagetable, sz, sz + 2*PGSIZE)) == 0)
+    goto bad;
+  sz = sz1;
+  uvmclear(pagetable, sz-2*PGSIZE);
+  sp = sz;
+  stackbase = sp - PGSIZE;
+
+  // Push argument strings, prepare rest of stack in ustack.
+  for(argc = 0; argv[argc]; argc++) {
+    if(argc >= MAXARG)
+      goto bad;
+    sp -= strlen(argv[argc]) + 1;
+    sp -= sp % 16; // riscv sp must be 16-byte aligned
+    if(sp < stackbase)
+      goto bad;
+    if(copyout(pagetable, sp, argv[argc], strlen(argv[argc]) + 1) < 0)
+      goto bad;
+    ustack[argc] = sp;
+  }
+  ustack[argc] = 0;
+
+  // push the array of argv[] pointers.
+  sp -= (argc+1) * sizeof(uint64);
+  sp -= sp % 16;
+  if(sp < stackbase)
+    goto bad;
+  if(copyout(pagetable, sp, (char *)ustack, (argc+1)*sizeof(uint64)) < 0)
+    goto bad;
+
+  // arguments to user main(argc, argv)
+  // argc is returned via the system call return
+  // value, which goes in a0.
+  p->trapframe->a1 = sp;
+
+  // Save program name for debugging.
+  for(last=s=path; *s; s++)
+    if(*s == '/')
+      last = s+1;
+  safestrcpy(p->name, last, sizeof(p->name));
+    
+  // Commit to the user image.
+  oldpagetable = p->pagetable;
+  p->pagetable = pagetable;
+  p->sz = sz;
+  p->trapframe->epc = elf.entry;  // initial program counter = main
+  p->trapframe->sp = sp; // initial stack pointer
+  proc_freepagetable(oldpagetable, oldsz);
+
+  return argc; // this ends up in a0, the first argument to main(argc, argv)
+
+ bad:
+  if(pagetable)
+    proc_freepagetable(pagetable, sz);
+  if(ip){
+    iunlockput(ip);
+    end_op();
+  }
+  return -1;
+}
+
+// Load a program segment into pagetable at virtual address va.
+// va must be page-aligned
+// and the pages from va to va+sz must already be mapped.
+// Returns 0 on success, -1 on failure.
+static int
+loadseg(pagetable_t pagetable, uint64 va, struct inode *ip, uint offset, uint sz)
+{
+  uint i, n;
+  uint64 pa;
+
+  for(i = 0; i < sz; i += PGSIZE){
+    pa = walkaddr(pagetable, va + i);
+    if(pa == 0)
+      panic("loadseg: address should exist");
+    if(sz - i < PGSIZE)
+      n = sz - i;
+    else
+      n = PGSIZE;
+    if(readi(ip, 0, (uint64)pa, offset+i, n) != n)
+      return -1;
+  }
+  
+  return 0;
+}
+
+kernel/vm.c 
+#include "param.h"
+#include "types.h"
+#include "memlayout.h"
+#include "elf.h"
+#include "riscv.h"
+#include "defs.h"
+#include "fs.h"
+
+/*
+ * the kernel's page table.
+ */
+pagetable_t kernel_pagetable;
+
+extern char etext[];  // kernel.ld sets this to end of kernel code.
+
+extern char trampoline[]; // trampoline.S
+
+// Make a direct-map page table for the kernel.
+pagetable_t
+kvmmake(void)
+{
+  pagetable_t kpgtbl;
+
+  kpgtbl = (pagetable_t) kalloc();
+  memset(kpgtbl, 0, PGSIZE);
+
+  // uart registers
+  kvmmap(kpgtbl, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+
+  // virtio mmio disk interface
+  kvmmap(kpgtbl, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+
+  // PLIC
+  kvmmap(kpgtbl, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+
+  // map kernel text executable and read-only.
+  kvmmap(kpgtbl, KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
+
+  // map kernel data and the physical RAM we'll make use of.
+  kvmmap(kpgtbl, (uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
+
+  // map the trampoline for trap entry/exit to
+  // the highest virtual address in the kernel.
+  kvmmap(kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+
+  // map kernel stacks
+  proc_mapstacks(kpgtbl);
+  
+  return kpgtbl;
+}
+
+// Initialize the one kernel_pagetable
+void
+kvminit(void)
+{
+  kernel_pagetable = kvmmake();
+}
+
+// Switch h/w page table register to the kernel's page table,
+// and enable paging.
+void
+kvminithart()
+{
+  w_satp(MAKE_SATP(kernel_pagetable));
+  sfence_vma();
+}
+
+// Return the address of the PTE in page table pagetable
+// that corresponds to virtual address va.  If alloc!=0,
+// create any required page-table pages.
+//
+// The risc-v Sv39 scheme has three levels of page-table
+// pages. A page-table page contains 512 64-bit PTEs.
+// A 64-bit virtual address is split into five fields:
+//   39..63 -- must be zero.
+//   30..38 -- 9 bits of level-2 index.
+//   21..29 -- 9 bits of level-1 index.
+//   12..20 -- 9 bits of level-0 index.
+//    0..11 -- 12 bits of byte offset within the page.
+pte_t *
+walk(pagetable_t pagetable, uint64 va, int alloc)
+{
+  if(va >= MAXVA)
+    panic("walk");
+
+  for(int level = 2; level > 0; level--) {
+    pte_t *pte = &pagetable[PX(level, va)];
+    if(*pte & PTE_V) {
+      pagetable = (pagetable_t)PTE2PA(*pte);
+    } else {
+      if(!alloc || (pagetable = (pde_t*)kalloc()) == 0)
+        return 0;
+      memset(pagetable, 0, PGSIZE);
+      *pte = PA2PTE(pagetable) | PTE_V;
+    }
+  }
+  return &pagetable[PX(0, va)];
+}
+
+// Look up a virtual address, return the physical address,
+// or 0 if not mapped.
+// Can only be used to look up user pages.
+uint64
+walkaddr(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte;
+  uint64 pa;
+
+  if(va >= MAXVA)
+    return 0;
+
+  pte = walk(pagetable, va, 0);
+  if(pte == 0)
+    return 0;
+  if((*pte & PTE_V) == 0)
+    return 0;
+  if((*pte & PTE_U) == 0)
+    return 0;
+  pa = PTE2PA(*pte);
+  return pa;
+}
+
+// add a mapping to the kernel page table.
+// only used when booting.
+// does not flush TLB or enable paging.
+void
+kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
+{
+  if(mappages(kpgtbl, va, sz, pa, perm) != 0)
+    panic("kvmmap");
+}
+
+// Create PTEs for virtual addresses starting at va that refer to
+// physical addresses starting at pa. va and size might not
+// be page-aligned. Returns 0 on success, -1 if walk() couldn't
+// allocate a needed page-table page.
+int
+mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
+{
+  uint64 a, last;
+  pte_t *pte;
+
+  if(size == 0)
+    panic("mappages: size");
+  
+  a = PGROUNDDOWN(va);
+  last = PGROUNDDOWN(va + size - 1);
+  for(;;){
+    if((pte = walk(pagetable, a, 1)) == 0)
+      return -1;
+    if(*pte & PTE_V)
+      panic("mappages: remap");
+    *pte = PA2PTE(pa) | perm | PTE_V;
+    if(a == last)
+      break;
+    a += PGSIZE;
+    pa += PGSIZE;
+  }
+  return 0;
+}
+
+// Remove npages of mappings starting from va. va must be
+// page-aligned. The mappings must exist.
+// Optionally free the physical memory.
+void
+uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
+{
+  uint64 a;
+  pte_t *pte;
+
+  if((va % PGSIZE) != 0)
+    panic("uvmunmap: not aligned");
+
+  for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
+    if((pte = walk(pagetable, a, 0)) == 0)
+      panic("uvmunmap: walk");
+    if((*pte & PTE_V) == 0)
+      panic("uvmunmap: not mapped");
+    if(PTE_FLAGS(*pte) == PTE_V)
+      panic("uvmunmap: not a leaf");
+    if(do_free){
+      uint64 pa = PTE2PA(*pte);
+      kfree((void*)pa);
+    }
+    *pte = 0;
+  }
+}
+
+// create an empty user page table.
+// returns 0 if out of memory.
+pagetable_t
+uvmcreate()
+{
+  pagetable_t pagetable;
+  pagetable = (pagetable_t) kalloc();
+  if(pagetable == 0)
+    return 0;
+  memset(pagetable, 0, PGSIZE);
+  return pagetable;
+}
+
+// Load the user initcode into address 0 of pagetable,
+// for the very first process.
+// sz must be less than a page.
+void
+uvminit(pagetable_t pagetable, uchar *src, uint sz)
+{
+  char *mem;
+
+  if(sz >= PGSIZE)
+    panic("inituvm: more than a page");
+  mem = kalloc();
+  memset(mem, 0, PGSIZE);
+  mappages(pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X|PTE_U);
+  memmove(mem, src, sz);
+}
+
+// Allocate PTEs and physical memory to grow process from oldsz to
+// newsz, which need not be page aligned.  Returns new size or 0 on error.
+uint64
+uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+{
+  char *mem;
+  uint64 a;
+
+  if(newsz < oldsz)
+    return oldsz;
+
+  oldsz = PGROUNDUP(oldsz);
+  for(a = oldsz; a < newsz; a += PGSIZE){
+    mem = kalloc();
+    if(mem == 0){
+      uvmdealloc(pagetable, a, oldsz);
+      return 0;
+    }
+    memset(mem, 0, PGSIZE);
+    if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+      kfree(mem);
+      uvmdealloc(pagetable, a, oldsz);
+      return 0;
+    }
+  }
+  return newsz;
+}
+
+// Deallocate user pages to bring the process size from oldsz to
+// newsz.  oldsz and newsz need not be page-aligned, nor does newsz
+// need to be less than oldsz.  oldsz can be larger than the actual
+// process size.  Returns the new process size.
+uint64
+uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+{
+  if(newsz >= oldsz)
+    return oldsz;
+
+  if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
+    int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+    uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
+  }
+
+  return newsz;
+}
+
+// Recursively free page-table pages.
+// All leaf mappings must already have been removed.
+void
+freewalk(pagetable_t pagetable)
+{
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      // this PTE points to a lower-level page table.
+      uint64 child = PTE2PA(pte);
+      freewalk((pagetable_t)child);
+      pagetable[i] = 0;
+    } else if(pte & PTE_V){
+      panic("freewalk: leaf");
+    }
+  }
+  kfree((void*)pagetable);
+}
+
+// Free user memory pages,
+// then free page-table pages.
+void
+uvmfree(pagetable_t pagetable, uint64 sz)
+{
+  if(sz > 0)
+    uvmunmap(pagetable, 0, PGROUNDUP(sz)/PGSIZE, 1);
+  freewalk(pagetable);
+}
+
+// Given a parent process's page table, copy
+// its memory into a child's page table.
+// Copies both the page table and the
+// physical memory.
+// returns 0 on success, -1 on failure.
+// frees any allocated pages on failure.
+int
+uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
+{
+  pte_t *pte;
+  uint64 pa, i;
+  uint flags;
+  char *mem;
+
+  for(i = 0; i < sz; i += PGSIZE){
+    if((pte = walk(old, i, 0)) == 0)
+      panic("uvmcopy: pte should exist");
+    if((*pte & PTE_V) == 0)
+      panic("uvmcopy: page not present");
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+    if((mem = kalloc()) == 0)
+      goto err;
+    memmove(mem, (char*)pa, PGSIZE);
+    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
+      kfree(mem);
+      goto err;
+    }
+  }
+  return 0;
+
+ err:
+  uvmunmap(new, 0, i / PGSIZE, 1);
+  return -1;
+}
+
+// mark a PTE invalid for user access.
+// used by exec for the user stack guard page.
+void
+uvmclear(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte;
+  
+  pte = walk(pagetable, va, 0);
+  if(pte == 0)
+    panic("uvmclear");
+  *pte &= ~PTE_U;
+}
+
+// Copy from kernel to user.
+// Copy len bytes from src to virtual address dstva in a given page table.
+// Return 0 on success, -1 on error.
+int
+copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
+{
+  uint64 n, va0, pa0;
+
+  while(len > 0){
+    va0 = PGROUNDDOWN(dstva);
+    pa0 = walkaddr(pagetable, va0);
+    if(pa0 == 0)
+      return -1;
+    n = PGSIZE - (dstva - va0);
+    if(n > len)
+      n = len;
+    memmove((void *)(pa0 + (dstva - va0)), src, n);
+
+    len -= n;
+    src += n;
+    dstva = va0 + PGSIZE;
+  }
+  return 0;
+}
+
+// Copy from user to kernel.
+// Copy len bytes to dst from virtual address srcva in a given page table.
+// Return 0 on success, -1 on error.
+int
+copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
+{
+  uint64 n, va0, pa0;
+
+  while(len > 0){
+    va0 = PGROUNDDOWN(srcva);
+    pa0 = walkaddr(pagetable, va0);
+    if(pa0 == 0)
+      return -1;
+    n = PGSIZE - (srcva - va0);
+    if(n > len)
+      n = len;
+    memmove(dst, (void *)(pa0 + (srcva - va0)), n);
+
+    len -= n;
+    dst += n;
+    srcva = va0 + PGSIZE;
+  }
+  return 0;
+}
+
+// Copy a null-terminated string from user to kernel.
+// Copy bytes to dst from virtual address srcva in a given page table,
+// until a '\0', or max.
+// Return 0 on success, -1 on error.
+int
+copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
+{
+  uint64 n, va0, pa0;
+  int got_null = 0;
+
+  while(got_null == 0 && max > 0){
+    va0 = PGROUNDDOWN(srcva);
+    pa0 = walkaddr(pagetable, va0);
+    if(pa0 == 0)
+      return -1;
+    n = PGSIZE - (srcva - va0);
+    if(n > max)
+      n = max;
+
+    char *p = (char *) (pa0 + (srcva - va0));
+    while(n > 0){
+      if(*p == '\0'){
+        *dst = '\0';
+        got_null = 1;
+        break;
+      } else {
+        *dst = *p;
+      }
+      --n;
+      --max;
+      p++;
+      dst++;
+    }
+
+    srcva = va0 + PGSIZE;
+  }
+  if(got_null){
+    return 0;
+  } else {
+    return -1;
+  }
+}

@@ -2,6 +2,7 @@
         # and causes each CPU to jump there.
         # kernel.ld causes the following code to
         # be placed at 0x80000000.
+        # 为每一个 CPU 核心都设置了一个独立的内核栈
 .section .text
 .global _entry
 _entry:

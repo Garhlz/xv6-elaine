@@ -3,6 +3,7 @@
 
 #include "syscall.h"
 
+# 用exec调用init程序
 # exec(init, argv)
 .globl start
 start:
