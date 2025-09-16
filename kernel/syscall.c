@@ -29,6 +29,7 @@ int fetchstr(uint64 addr, char *buf, int max)
   return strlen(buf);
 }
 
+// 根据输入的n获取参数
 static uint64
 argraw(int n)
 {
