@@ -4,6 +4,7 @@
         #
         # push all registers, call kerneltrap(), restore, return.
         #
+        #当 CPU 已经在内核态执行代码时，如果发生了外部中断（比如时钟、磁盘）或内部异常（比如内核代码访问了无效地址），CPU 就会跳转到这里。
 .globl kerneltrap
 .globl kernelvec
 .align 4
@@ -87,7 +88,7 @@ kernelvec:
 
         #
         # machine-mode timer interrupt.
-        #
+        # 机器模式 (M-Mode) 下的时钟中断入口
 .globl timervec
 .align 4
 timervec:
