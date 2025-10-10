@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "array": "c",
+        "algorithm": "c",
+        "random": "c",
+        "numeric": "c"
+    }
+}
