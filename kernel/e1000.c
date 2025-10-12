@@ -19,17 +19,19 @@ static struct mbuf *rx_mbufs[RX_RING_SIZE];
 // remember where the e1000's registers live.
 static volatile uint32 *regs;
 
-struct spinlock e1000_lock;
+// struct spinlock e1000_lock;
+struct spinlock tx_lock;
+struct spinlock rx_lock;
 
 // called by pci_init().
 // xregs is the memory address at which the
 // e1000's registers are mapped.
-void
-e1000_init(uint32 *xregs)
+void e1000_init(uint32 *xregs)
 {
   int i;
 
-  initlock(&e1000_lock, "e1000");
+  initlock(&tx_lock, "tx_lock");
+  initlock(&rx_lock, "rx_lock");
 
   regs = xregs;
 
@@ -41,26 +43,33 @@ e1000_init(uint32 *xregs)
 
   // [E1000 14.5] Transmit initialization
   memset(tx_ring, 0, sizeof(tx_ring));
-  for (i = 0; i < TX_RING_SIZE; i++) {
+  for (i = 0; i < TX_RING_SIZE; i++)
+  {
     tx_ring[i].status = E1000_TXD_STAT_DD;
     tx_mbufs[i] = 0;
   }
-  regs[E1000_TDBAL] = (uint64) tx_ring;
-  if(sizeof(tx_ring) % 128 != 0)
+  regs[E1000_TDBAL] = (uint64)tx_ring;
+  // 设置Transmit Descriptor Base Address Low
+  if (sizeof(tx_ring) % 128 != 0)
     panic("e1000");
   regs[E1000_TDLEN] = sizeof(tx_ring);
+  // 设置Transmit Descriptor Length
   regs[E1000_TDH] = regs[E1000_TDT] = 0;
-  
-  // [E1000 14.4] Receive initialization
+  // 把网卡的“已处理到哪”的指针 (TDH, Head) 和我们的“下一个要放哪”的指针 (TDT, Tail) 都拨到 0 号位置。
+  //  [E1000 14.4] Receive initialization
   memset(rx_ring, 0, sizeof(rx_ring));
-  for (i = 0; i < RX_RING_SIZE; i++) {
+
+  // 接受环初始化
+  for (i = 0; i < RX_RING_SIZE; i++)
+  {
+    // 准备好空缓冲区
     rx_mbufs[i] = mbufalloc(0);
     if (!rx_mbufs[i])
       panic("e1000");
-    rx_ring[i].addr = (uint64) rx_mbufs[i]->head;
+    rx_ring[i].addr = (uint64)rx_mbufs[i]->head;
   }
-  regs[E1000_RDBAL] = (uint64) rx_ring;
-  if(sizeof(rx_ring) % 128 != 0)
+  regs[E1000_RDBAL] = (uint64)rx_ring;
+  if (sizeof(rx_ring) % 128 != 0)
     panic("e1000");
   regs[E1000_RDH] = 0;
   regs[E1000_RDT] = RX_RING_SIZE - 1;
@@ -68,32 +77,31 @@ e1000_init(uint32 *xregs)
 
   // filter by qemu's MAC address, 52:54:00:12:34:56
   regs[E1000_RA] = 0x12005452;
-  regs[E1000_RA+1] = 0x5634 | (1<<31);
+  regs[E1000_RA + 1] = 0x5634 | (1 << 31);
   // multicast table
-  for (int i = 0; i < 4096/32; i++)
+  for (int i = 0; i < 4096 / 32; i++)
     regs[E1000_MTA + i] = 0;
 
-  // transmitter control bits.
-  regs[E1000_TCTL] = E1000_TCTL_EN |  // enable
-    E1000_TCTL_PSP |                  // pad short packets
-    (0x10 << E1000_TCTL_CT_SHIFT) |   // collision stuff
-    (0x40 << E1000_TCTL_COLD_SHIFT);
-  regs[E1000_TIPG] = 10 | (8<<10) | (6<<20); // inter-pkt gap
+  // transmitter control bits. 启用发送器
+  regs[E1000_TCTL] = E1000_TCTL_EN |                 // enable
+                     E1000_TCTL_PSP |                // pad short packets
+                     (0x10 << E1000_TCTL_CT_SHIFT) | // collision stuff
+                     (0x40 << E1000_TCTL_COLD_SHIFT);
+  regs[E1000_TIPG] = 10 | (8 << 10) | (6 << 20); // inter-pkt gap
 
-  // receiver control bits.
-  regs[E1000_RCTL] = E1000_RCTL_EN | // enable receiver
-    E1000_RCTL_BAM |                 // enable broadcast
-    E1000_RCTL_SZ_2048 |             // 2048-byte rx buffers
-    E1000_RCTL_SECRC;                // strip CRC
-  
-  // ask e1000 for receive interrupts.
-  regs[E1000_RDTR] = 0; // interrupt after every received packet (no timer)
-  regs[E1000_RADV] = 0; // interrupt after every packet (no timer)
+  // receiver control bits. 启用接收器
+  regs[E1000_RCTL] = E1000_RCTL_EN |      // enable receiver
+                     E1000_RCTL_BAM |     // enable broadcast
+                     E1000_RCTL_SZ_2048 | // 2048-byte rx buffers
+                     E1000_RCTL_SECRC;    // strip CRC
+
+  // ask e1000 for receive interrupts. 开启中断
+  regs[E1000_RDTR] = 0;       // interrupt after every received packet (no timer)
+  regs[E1000_RADV] = 0;       // interrupt after every packet (no timer)
   regs[E1000_IMS] = (1 << 7); // RXDW -- Receiver Descriptor Write Back
 }
 
-int
-e1000_transmit(struct mbuf *m)
+int e1000_transmit(struct mbuf *m)
 {
   //
   // Your code here.
@@ -102,7 +110,35 @@ e1000_transmit(struct mbuf *m)
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after sending.
   //
-  
+  acquire(&tx_lock);
+
+  // 读取 TDT 寄存器，找到网卡期望我们放置下一个包的索引
+  uint32 idx = regs[E1000_TDT];
+
+  if (!(tx_ring[idx].status & E1000_TXD_STAT_DD))
+  {
+    // 如果 DD 位没有被设置，说明网卡还没处理完这个位置的旧包，发送环满了
+    release(&tx_lock);
+    return -1; // 返回错误
+  }
+
+  // 之前这个位置有mbuf,但是已经发送出去了
+  if (tx_mbufs[idx])
+  {
+    mbuffree(tx_mbufs[idx]);
+  }
+
+  tx_mbufs[idx] = m;
+  tx_ring[idx].addr = (uint64)m->head;
+  tx_ring[idx].length = m->len;
+
+  // 设置命令位，EOP表示这是包的结尾，RS表示我们希望网卡在完成后报告状态（设置DD位）
+  tx_ring[idx].cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS;
+
+  // 网卡一直在监视TDT寄存器，一旦更新就会启动DMA去内存中取出数据
+  regs[E1000_TDT] = (idx + 1) % TX_RING_SIZE;
+
+  release(&tx_lock);
   return 0;
 }
 
@@ -115,10 +151,42 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
+  acquire(&rx_lock);
+
+  for (;;)
+  {
+    // RDT 是驱动上次处理到的位置，所以新包应该在 RDT+1
+    uint32 idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+
+    // DD 表示网卡已经把数据放好了
+    if (!(rx_ring[idx].status & E1000_RXD_STAT_DD))
+    {
+      // 如果 DD 位没有被设置，说明没有更多的新包了，退出循环
+      break;
+    }
+
+    struct mbuf *m = rx_mbufs[idx];
+
+    m->len = rx_ring[idx].length;
+
+    net_rx(m);
+
+    rx_mbufs[idx] = mbufalloc(0);
+
+    if (!rx_mbufs[idx])
+    {
+      panic("e1000");
+    }
+
+    rx_ring[idx].addr = (uint64)rx_mbufs[idx]->head;
+    rx_ring[idx].status = 0;
+
+    regs[E1000_RDT] = idx;
+  }
+  release(&rx_lock);
 }
 
-void
-e1000_intr(void)
+void e1000_intr(void)
 {
   // tell the e1000 we've seen this interrupt;
   // without this the e1000 won't raise any
