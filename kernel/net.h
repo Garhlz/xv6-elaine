@@ -11,6 +11,7 @@ struct mbuf
   char *head;          // the current start position of the buffer
   unsigned int len;    // the length of the buffer
   char buf[MBUF_SIZE]; // the backing store
+  int priority;        // TODO 新增优先级字段，目前无法提供
 };
 
 char *mbufpull(struct mbuf *m, unsigned int len);

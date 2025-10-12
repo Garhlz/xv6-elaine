@@ -16,6 +16,12 @@ static struct mbuf *tx_mbufs[TX_RING_SIZE];
 static struct rx_desc rx_ring[RX_RING_SIZE] __attribute__((aligned(16)));
 static struct mbuf *rx_mbufs[RX_RING_SIZE];
 
+#define TX_SW_QUEUE_SIZE 64
+static struct mbuf *tx_sw_queue[TX_SW_QUEUE_SIZE];
+static uint32 tx_sw_head = 0;
+static uint32 tx_sw_tail = 0;
+static struct spinlock tx_sw_queue_lock;
+
 // remember where the e1000's registers live.
 static volatile uint32 *regs;
 
@@ -32,7 +38,7 @@ void e1000_init(uint32 *xregs)
 
   initlock(&tx_lock, "tx_lock");
   initlock(&rx_lock, "rx_lock");
-
+  initlock(&tx_sw_queue_lock, "tx_sw_queue_lock");
   regs = xregs;
 
   // Reset the device
@@ -95,50 +101,32 @@ void e1000_init(uint32 *xregs)
                      E1000_RCTL_SZ_2048 | // 2048-byte rx buffers
                      E1000_RCTL_SECRC;    // strip CRC
 
-  // ask e1000 for receive interrupts. 开启中断
-  regs[E1000_RDTR] = 0;       // interrupt after every received packet (no timer)
-  regs[E1000_RADV] = 0;       // interrupt after every packet (no timer)
-  regs[E1000_IMS] = (1 << 7); // RXDW -- Receiver Descriptor Write Back
+  // ask e1000 for receive interrupts. 开启接收中断
+  regs[E1000_RDTR] = 0; // interrupt after every received packet (no timer)
+  regs[E1000_RADV] = 0; // interrupt after every packet (no timer)
+  // regs[E1000_IMS] = (1 << 7); // RXDW -- Receiver Descriptor Write Back
+  // 同时开启接收中断 (RXT0) 和发送队列空中断 (TXQE)
+  regs[E1000_IMS] = E1000_IMS_RXT0 | E1000_IMS_TXQE;
 }
+
+static void e1000_tx_kickstart();
 
 int e1000_transmit(struct mbuf *m)
 {
-  //
-  // Your code here.
-  //
-  // the mbuf contains an ethernet frame; program it into
-  // the TX descriptor ring so that the e1000 sends it. Stash
-  // a pointer so that it can be freed after sending.
-  //
-  acquire(&tx_lock);
-
-  // 读取 TDT 寄存器，找到网卡期望我们放置下一个包的索引
-  uint32 idx = regs[E1000_TDT];
-
-  if (!(tx_ring[idx].status & E1000_TXD_STAT_DD))
+  acquire(&tx_sw_queue_lock);
+  if ((tx_sw_tail + 1) % TX_SW_QUEUE_SIZE == tx_sw_head)
   {
-    // 如果 DD 位没有被设置，说明网卡还没处理完这个位置的旧包，发送环满了
-    release(&tx_lock);
-    return -1; // 返回错误
+    release(&tx_sw_queue_lock);
+    return -1;
   }
 
-  // 之前这个位置有mbuf,但是已经发送出去了
-  if (tx_mbufs[idx])
-  {
-    mbuffree(tx_mbufs[idx]);
-  }
+  tx_sw_queue[tx_sw_tail] = m;
+  tx_sw_tail = (tx_sw_tail + 1) % TX_SW_QUEUE_SIZE;
 
-  tx_mbufs[idx] = m;
-  tx_ring[idx].addr = (uint64)m->head;
-  tx_ring[idx].length = m->len;
+  e1000_tx_kickstart();
 
-  // 设置命令位，EOP表示这是包的结尾，RS表示我们希望网卡在完成后报告状态（设置DD位）
-  tx_ring[idx].cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS;
+  release(&tx_sw_queue_lock);
 
-  // 网卡一直在监视TDT寄存器，一旦更新就会启动DMA去内存中取出数据
-  regs[E1000_TDT] = (idx + 1) % TX_RING_SIZE;
-
-  release(&tx_lock);
   return 0;
 }
 
@@ -186,12 +174,62 @@ e1000_recv(void)
   release(&rx_lock);
 }
 
+static void
+e1000_tx_kickstart()
+{
+  // acquire(&tx_sw_queue_lock) 应该由调用者持有
+
+  // 循环地尝试从软件队列搬运包到硬件环
+  while (tx_sw_head != tx_sw_tail)
+  {
+    acquire(&tx_lock);
+    uint32 idx = regs[E1000_TDT];
+
+    if (!(tx_ring[idx].status & E1000_TXD_STAT_DD))
+    {
+      // 硬件环满了，我们无能为力，只能等下一次中断再试
+      release(&tx_lock);
+      break;
+    }
+
+    // 释放上一个从这个描述符发送出去的 mbuf
+    if (tx_mbufs[idx])
+      mbuffree(tx_mbufs[idx]);
+
+    // 从软件队列的头部取出一个 mbuf
+    struct mbuf *m = tx_sw_queue[tx_sw_head];
+    tx_sw_head = (tx_sw_head + 1) % TX_SW_QUEUE_SIZE;
+
+    // 把它放到硬件环上
+    tx_mbufs[idx] = m;
+    tx_ring[idx].addr = (uint64)m->head;
+    tx_ring[idx].length = m->len;
+    tx_ring[idx].cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS;
+
+    regs[E1000_TDT] = (idx + 1) % TX_RING_SIZE;
+    release(&tx_lock);
+  }
+}
+
 void e1000_intr(void)
 {
-  // tell the e1000 we've seen this interrupt;
-  // without this the e1000 won't raise any
-  // further interrupts.
-  regs[E1000_ICR] = 0xffffffff;
+  // 读取中断原因寄存器
+  uint32 status = regs[E1000_ICR];
 
-  e1000_recv();
+  // 检查是否包含接收中断标志
+  if (status & E1000_ICR_RXT0)
+  {
+    e1000_recv();
+  }
+
+  // 检查是否包含发送中断标志
+  if (status & E1000_ICR_TXQE)
+  {
+    acquire(&tx_sw_queue_lock);
+    e1000_tx_kickstart();
+    release(&tx_sw_queue_lock);
+  }
+
+  // 清除我们已经处理过的中断标志
+  regs[E1000_ICR] = status;
 }
