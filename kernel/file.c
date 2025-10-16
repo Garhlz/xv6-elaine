@@ -179,6 +179,7 @@ int filewrite(struct file *f, uint64 addr, int n)
     // and 2 blocks of slop for non-aligned writes.
     // this really belongs lower down, since writei()
     // might be writing a device like the console.
+    // 因为日志区域的大小有限，需要把文件拆分成很多份进行写入
     int max = ((MAXOPBLOCKS - 1 - 1 - 2) / 2) * BSIZE;
     int i = 0;
     while (i < n)

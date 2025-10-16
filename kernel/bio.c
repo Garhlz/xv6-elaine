@@ -56,6 +56,7 @@ void binit(void)
 // If not found, allocate a buffer.
 // In either case, return locked buffer.
 // 从缓存中获取一个物理块，如果缓存不命中，就返回LRU的缓存块
+// 返回的是已经上锁的buffer块
 static struct buf *
 bget(uint dev, uint blockno)
 {
@@ -95,6 +96,7 @@ bget(uint dev, uint blockno)
 }
 
 // Return a locked buf with the contents of the indicated block.
+// 返回缓存块，如果没有命中就从磁盘读数据
 struct buf *
 bread(uint dev, uint blockno)
 {
@@ -112,6 +114,8 @@ bread(uint dev, uint blockno)
 }
 
 // Write b's contents to disk.  Must be locked.
+// 因为buf本质上仍然是内存（内核）中的数据，需要调用函数写到磁盘中
+// 每次出现bwrite,就意味着出现了实质性的磁盘写入
 void bwrite(struct buf *b)
 {
   if (!holdingsleep(&b->lock))
