@@ -1,3 +1,8 @@
+#ifndef XV6_FS_H
+#define XV6_FS_H
+
+#include "types.h"
+
 // On-disk file system format.
 // Both the kernel and user programs use this header file.
 
@@ -10,8 +15,7 @@
 //
 // mkfs computes the super block and builds an initial file system. The
 // super block describes the disk layout:
-struct superblock
-{
+struct superblock {
     uint magic;      // Must be FSMAGIC
     uint size;       // Size of file system image (blocks)
     uint nblocks;    // Number of data blocks
@@ -29,8 +33,7 @@ struct superblock
 #define MAXFILE (NDIRECT + NINDIRECT)
 
 // On-disk inode structure
-struct dinode
-{
+struct dinode {
     short type;              // File type
     short major;             // Major device number (T_DEVICE only)
     short minor;             // Minor device number (T_DEVICE only)
@@ -54,8 +57,9 @@ struct dinode
 // Directory is a file containing a sequence of dirent structures.
 #define DIRSIZ 14
 
-struct dirent
-{
+struct dirent {
     ushort inum;
     char name[DIRSIZ];
 }; // 文件名到inode编号的映射
+
+#endif

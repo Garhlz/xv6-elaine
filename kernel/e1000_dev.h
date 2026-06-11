@@ -1,3 +1,8 @@
+#ifndef XV6_E1000_DEV_H
+#define XV6_E1000_DEV_H
+
+#include "types.h"
+
 //
 // E1000 hardware definitions: registers and DMA ring format.
 // from the Intel 82540EP/EM &c manual.
@@ -115,15 +120,14 @@
 #define E1000_ICR_RXT0 (1 << 7)
 
 // [E1000 3.3.3]
-struct tx_desc
-{
-  uint64 addr;
-  uint16 length;
-  uint8 cso;
-  uint8 cmd;
-  uint8 status;
-  uint8 css;
-  uint16 special;
+struct tx_desc {
+    uint64 addr;
+    uint16 length;
+    uint8 cso;
+    uint8 cmd;
+    uint8 status;
+    uint8 css;
+    uint16 special;
 };
 
 /* Receive Descriptor bit definitions [E1000 3.2.3.1] */
@@ -131,12 +135,13 @@ struct tx_desc
 #define E1000_RXD_STAT_EOP 0x02 /* End of Packet */
 
 // [E1000 3.2.3]
-struct rx_desc
-{
-  uint64 addr;   /* Address of the descriptor's data buffer */
-  uint16 length; /* Length of data DMAed into data buffer */
-  uint16 csum;   /* Packet checksum */
-  uint8 status;  /* Descriptor status */
-  uint8 errors;  /* Descriptor Errors */
-  uint16 special;
+struct rx_desc {
+    uint64 addr;   /* Address of the descriptor's data buffer */
+    uint16 length; /* Length of data DMAed into data buffer */
+    uint16 csum;   /* Packet checksum */
+    uint8 status;  /* Descriptor status */
+    uint8 errors;  /* Descriptor Errors */
+    uint16 special;
 };
+
+#endif
