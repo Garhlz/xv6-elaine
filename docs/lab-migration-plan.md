@@ -26,7 +26,7 @@
 ## 建议整合顺序
 
 1. `syscall`（✅ 已完成）
-2. `pgtbl`
+2. `pgtbl`（✅ 已完成）
 3. `traps`
 4. `cow`
 5. `thread`
@@ -105,13 +105,11 @@
 
 ## pgtbl
 
-官方内容：三部分，分别是：
+当前状态：已整合到 `dev/all`。
 
-1. 在 `USYSCALL` 共享只读页中暴露 PID，加速 `getpid()`
-2. 实现 `vmprint()` 打印页表
-3. 实现 `pgaccess()` 检测页访问位
+官方内容：三部分：通过 USYSCALL 共享只读页加速 `getpid()`、实现 `vmprint()` 递归打印页表、实现 `pgaccess()` 检测页访问位（PTE_A）。
 
-建议迁移文件：
+实际迁移文件：
 
 - `kernel/proc.h`
 - `kernel/proc.c`
@@ -121,12 +119,33 @@
 - `kernel/defs.h`
 - `kernel/exec.c`
 - `kernel/sysproc.c`
-- `kernel/syscall.h`
 - `kernel/syscall.c`
+- `kernel/syscall.h`
 - `user/user.h`
+- `user/ulib.c`
 - `user/usys.pl`
 - `user/pgtbltest.c`
 - `Makefile`
+- `grade-lab-pgtbl`
+- `answers-pgtbl.txt`
+
+本轮没有迁移的内容：
+
+- `kernel/vmcopyin.c`（copyin_new/copyinstr_new，原 LAB_PGTBL 下的附加优化）
+- 格式化差异
+
+验证方式：
+
+- `make grade-pgtbl`
+- `make grade-all`
+
+其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl`（用户态 → 系统调用 → 驱动 → 内存管理）。
+
+注意：
+
+- 移除了 `#ifdef LAB_PGTBL` 条件编译，USYSCALL 和 pgaccess 在 dev/all 中无条件启用。
+- `ugetpid()` 是用户态库函数（直接读 USYSCALL 页），实现在 `user/ulib.c`，不是系统调用。
+- pte printout 测试期望的页表地址会因构建不同而变化，grader 用正则匹配固定的格式模式。
 
 ## traps
 

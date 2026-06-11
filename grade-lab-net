@@ -36,8 +36,4 @@ def test_nettest_dns_test():
 #    # just a simple sanity check, will be graded manually
 #    check_answers("answers-net.txt")
 
-@test(1, "time")
-def test_time():
-    check_time()
-
 run_tests()

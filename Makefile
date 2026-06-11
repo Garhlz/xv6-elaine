@@ -195,6 +195,7 @@ UPROGS=\
 	$U/_zombie\
 	$U/_trace\
 	$U/_sysinfotest\
+	$U/_pgtbltest\
 
 
 
@@ -236,11 +237,6 @@ ph: notxv6/ph.c
 
 barrier: notxv6/barrier.c
 	gcc -o barrier -g -O2 $(XCFLAGS) notxv6/barrier.c -pthread
-endif
-
-ifeq ($(LAB),pgtbl)
-UPROGS += \
-	$U/_pgtbltest
 endif
 
 ifeq ($(LAB),lock)
@@ -359,6 +355,12 @@ grade-syscall:
           (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
 	./grade-lab-syscall $(GRADEFLAGS)
 
+grade-pgtbl:
+	@echo $(MAKE) clean
+	@$(MAKE) clean || \
+          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
+	./grade-lab-pgtbl $(GRADEFLAGS)
+
 grade-all:
 	@echo $(MAKE) clean
 	@$(MAKE) clean || \
@@ -367,8 +369,9 @@ grade-all:
 	@$(MAKE) .gdbinit fs.img || \
           (echo "'make .gdbinit fs.img' failed." && exit 1)
 	./grade-lab-util --no-make $(GRADEFLAGS)
-	./grade-lab-net --no-make $(GRADEFLAGS)
 	./grade-lab-syscall --no-make $(GRADEFLAGS)
+	./grade-lab-net --no-make $(GRADEFLAGS)
+	./grade-lab-pgtbl --no-make $(GRADEFLAGS)
 
 ##
 ## FOR web handin

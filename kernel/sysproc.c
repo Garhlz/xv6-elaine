@@ -107,3 +107,34 @@ uint64 sys_sysinfo(void) {
     }
     return 0;
 }
+
+// Return the access bits for the given range of user pages.
+int sys_pgaccess(void) {
+    uint64 start_addr;
+    if (argaddr(0, &start_addr) < 0)
+        return -1;
+
+    int num_pages;
+    if (argint(1, &num_pages) < 0)
+        return -1;
+
+    uint64 user_buf_addr;
+    if (argaddr(2, &user_buf_addr) < 0)
+        return -1;
+
+    uint mask = 0;
+    for (int i = 0; i < num_pages; i++) {
+        uint64 current_va = start_addr + i * PGSIZE;
+        pte_t *pte = walk(myproc()->pagetable, current_va, 0);
+        if ((pte == 0) || ((*pte & PTE_V) == 0))
+            return -1;
+
+        if (*pte & PTE_A)
+            mask |= (1 << i);
+
+        *pte &= (~PTE_A);
+    }
+    copyout(myproc()->pagetable, user_buf_addr, (char *)&mask, sizeof(mask));
+
+    return 0;
+}

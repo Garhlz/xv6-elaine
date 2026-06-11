@@ -320,6 +320,31 @@ void uvmclear(pagetable_t pagetable, uint64 va) {
     *pte &= ~PTE_U;
 }
 
+// Recursively print page-table entries.
+static void vmprint_recursive(pagetable_t pagetable, int depth) {
+    for (int i = 0; i < 512; i++) {
+        pte_t pte = pagetable[i];
+        if (pte & PTE_V) {
+            for (int j = 0; j < depth; j++) {
+                if (j != 0)
+                    printf(" ");
+                printf("..");
+            }
+            printf("%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
+            if ((pte & (PTE_R | PTE_W | PTE_X)) == 0) {
+                uint64 child = PTE2PA(pte);
+                vmprint_recursive((pagetable_t)child, depth + 1);
+            }
+        }
+    }
+}
+
+// Print the page table.
+void vmprint(pagetable_t pagetable) {
+    printf("page table %p\n", pagetable);
+    vmprint_recursive(pagetable, 1);
+}
+
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.

@@ -29,4 +29,34 @@ Recent history uses short, imperative or descriptive commit subjects such as `fi
 
 ## Agent-Specific Instructions
 
-Do not overwrite generated lab artifacts unless a build command regenerates them. Prefer small patches that preserve xv6’s teaching-oriented clarity over broad refactors.
+### Branch & Workspace Awareness
+
+- The integration branch is **`dev/all`** (based on `net`). Always verify with `git branch` before editing.
+- Never work directly on lab branches (`util`, `syscall`, `pgtbl`, `net`, etc.) — those are reference implementations checked out from upstream.
+
+### Code Hygiene (headers, formatting, diagnostics)
+
+- After editing any header, run `clangd --check=<file>` to catch forward-reference or missing-type errors. Headers must be **self-contained**: include their own `#include` dependencies (e.g. `types.h` for `uint64`).
+- Before every commit, run `clang-format -i` on every changed `.c` and `.h` file. The repository `.clang-format` uses 4-space indent, LLVM base style.
+
+### Lab Migration Workflow
+
+When migrating a lab from its reference branch to `dev/all`:
+
+1. `git diff net..<lab> --name-only` to list the functional files for that lab.
+2. Migrate only the **lab-specific functional code** — skip formatting noise, toolchain config (`.clang-format`, `.clangd`, `compile_commands.json`), and temporary files.
+3. Remove `#ifdef LAB_*` guards for the migrated lab; `dev/all` integrates all labs unconditionally.
+4. **Do not modify grader expectations** to match local file differences. Instead, add stable test data (e.g. the original `README` file) so the grader stays unchanged.
+5. Run the grader (`make grade-<lab>` or `make grade-all`) and confirm all tests pass.
+6. After all changes, sync the migration status in `docs/lab-migration-plan.md` and `README.md`.
+
+### Commit Format
+
+- Format: `feat(<lab>): integrate <lab> lab changes` followed by `- ` bullet points with **no blank lines** between them.
+- Do **not** add `Co-Authored-By: Claude`.
+
+### Grading Conventions
+
+- `make grade-all` order: **util → syscall → net → pgtbl** (course-natural path: user-space tools, then system calls, then drivers, then memory management).
+- `conf/lab.mk` keeps `LAB=net` with a comment explaining that `dev/all` integrates multiple labs; this ensures net-specific kernel objects and QEMU flags are always active.
+- **Remove `time.txt` checks** from all graders. The `@test(1, "time")` / `check_time()` block in every grader script should be deleted — `time.txt` is a course hand-in artifact that is irrelevant for `dev/all`.
