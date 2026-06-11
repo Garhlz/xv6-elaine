@@ -25,7 +25,7 @@
 
 ## 建议整合顺序
 
-1. `syscall`
+1. `syscall`（✅ 已完成）
 2. `pgtbl`
 3. `traps`
 4. `cow`
@@ -34,7 +34,47 @@
 7. `fs`
 8. `mmap`
 
-`net` 已完成，不需要再次迁移。
+`net` 已完成，`util` 已完成，不需要再次迁移。
+
+## syscall
+
+当前状态：已整合到 `dev/all`。
+
+官方内容：新增 `trace` 和 `sysinfo` 两个系统调用，理解用户态 stub、系统调用分发表、参数解析、进程结构扩展。
+
+实际迁移文件：
+
+- `kernel/syscall.c`
+- `kernel/syscall.h`
+- `kernel/sysproc.c`
+- `kernel/proc.h`
+- `kernel/proc.c`
+- `kernel/kalloc.c`
+- `kernel/defs.h`
+- `kernel/sysinfo.h`
+- `user/user.h`
+- `user/usys.pl`
+- `user/trace.c`
+- `user/sysinfotest.c`
+- `Makefile`
+- `grade-lab-syscall`
+
+本轮没有迁移的内容：
+
+- 格式化差异（对齐、空格等）
+- `.clang-format`、`.clangd`、`compile_commands.json` 等工具链配置文件
+
+验证方式：
+
+- `make grade-syscall`
+- `make grade-all`
+
+其中 `make grade-all` 会先统一构建一遍，再依次执行 `util`、`net` 与 `syscall` 的 grader。
+
+注意：
+
+- grader 中的文件引用从 `README` 改为 `README.md`（匹配本仓库实际文件名），对应 read 大小期望值也做了适配。
+- `user/usys.pl` 中保留了 `connect` 条目（net lab 需要），新增 `trace` 和 `sysinfo` 条目。
 
 ## util
 
@@ -62,26 +102,6 @@
 - `make grade-all`
 
 其中 `make grade-all` 会先统一构建一遍，再依次执行 `util` 与 `net` 的 grader。
-
-## syscall
-
-官方内容：新增 `trace` 和 `sysinfo` 两个系统调用，理解用户态 stub、系统调用分发表、参数解析、进程结构扩展。
-
-建议迁移文件：
-
-- `kernel/syscall.h`
-- `kernel/syscall.c`
-- `kernel/sysproc.c`
-- `kernel/proc.h`
-- `kernel/proc.c`
-- `kernel/kalloc.c`
-- `kernel/defs.h`
-- `kernel/sysinfo.h`
-- `user/user.h`
-- `user/usys.pl`
-- `user/trace.c`
-- `user/sysinfotest.c`
-- `Makefile`
 
 ## pgtbl
 

@@ -193,6 +193,8 @@ UPROGS=\
 	$U/_wc\
 	$U/_xargs\
 	$U/_zombie\
+	$U/_trace\
+	$U/_sysinfotest\
 
 
 
@@ -263,8 +265,8 @@ UEXTRA=
 UEXTRA += user/xargstest.sh
 
 
-fs.img: mkfs/mkfs README.md $(UEXTRA) $(UPROGS)
-	mkfs/mkfs fs.img README.md $(UEXTRA) $(UPROGS)
+fs.img: mkfs/mkfs README README.md $(UEXTRA) $(UPROGS)
+	mkfs/mkfs fs.img README README.md $(UEXTRA) $(UPROGS)
 
 -include kernel/*.d user/*.d
 
@@ -351,6 +353,12 @@ grade-net:
           (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
 	./grade-lab-net $(GRADEFLAGS)
 
+grade-syscall:
+	@echo $(MAKE) clean
+	@$(MAKE) clean || \
+          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
+	./grade-lab-syscall $(GRADEFLAGS)
+
 grade-all:
 	@echo $(MAKE) clean
 	@$(MAKE) clean || \
@@ -360,6 +368,7 @@ grade-all:
           (echo "'make .gdbinit fs.img' failed." && exit 1)
 	./grade-lab-util --no-make $(GRADEFLAGS)
 	./grade-lab-net --no-make $(GRADEFLAGS)
+	./grade-lab-syscall --no-make $(GRADEFLAGS)
 
 ##
 ## FOR web handin
