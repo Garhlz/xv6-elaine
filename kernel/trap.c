@@ -63,29 +63,34 @@ void usertrap(void) {
         // COW page fault
         uint64 va = PGROUNDDOWN(r_stval());
         pagetable_t pagetable = p->pagetable;
-        pte_t *pte = walk(pagetable, va, 0);
-        if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0) {
+        if (va >= MAXVA) {
             p->killed = 1;
-        } else if (*pte & PTE_COW) {
-            uint64 pa = PTE2PA(*pte);
-            if (get_ref(pa) == 1) {
-                *pte &= ~PTE_COW;
-                *pte |= PTE_W;
-            } else {
-                uint flags = PTE_FLAGS(*pte);
-                flags &= ~PTE_COW;
-                flags |= PTE_W;
-                char *mem = kalloc();
-                if (mem == 0) {
-                    p->killed = 1;
-                } else {
-                    memmove(mem, (char *)pa, PGSIZE);
-                    *pte = PA2PTE((uint64)mem) | flags;
-                    decrease_ref(pa);
-                }
-            }
         } else {
-            p->killed = 1;
+            pte_t *pte = walk(pagetable, va, 0);
+            if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0) {
+                p->killed = 1;
+            } else if (*pte & PTE_COW) {
+                uint64 pa = PTE2PA(*pte);
+                if (get_ref(pa) == 1) {
+                    *pte &= ~PTE_COW;
+                    *pte |= PTE_W;
+                } else {
+                    uint flags = PTE_FLAGS(*pte);
+                    flags &= ~PTE_COW;
+                    flags |= PTE_W;
+                    char *mem = kalloc();
+                    if (mem == 0) {
+                        p->killed = 1;
+                    } else {
+                        memmove(mem, (char *)pa, PGSIZE);
+                        *pte = PA2PTE((uint64)mem) | flags;
+                        kfree((void *)pa);
+                    }
+                }
+                sfence_vma();
+            } else {
+                p->killed = 1;
+            }
         }
     } else if ((which_dev = devintr()) != 0) {
         // ok

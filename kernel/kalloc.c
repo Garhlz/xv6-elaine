@@ -21,96 +21,144 @@ struct run {
 struct {
     struct spinlock lock;
     struct run *freelist;
-    int ref_count[PHYSTOP / PGSIZE];
-} kmem;
+} kmems[NCPU];
 
-void kinit() {
-    initlock(&kmem.lock, "kmem");
+static char kmem_lock_names[NCPU][16];
+
+struct {
+    struct spinlock lock;
+    int ref_count[PHYSTOP / PGSIZE];
+} page_refs;
+
+void kinit(void) {
+    for (int i = 0; i < NCPU; i++) {
+        snprintf(kmem_lock_names[i], sizeof(kmem_lock_names[i]), "kmem_%d", i);
+        initlock(&kmems[i].lock, kmem_lock_names[i]);
+        kmems[i].freelist = 0;
+    }
+    initlock(&page_refs.lock, "page_refs");
     freerange(end, (void *)PHYSTOP);
 }
 
-void freerange(void *pa_start, void *pa_end) {
-    char *p;
-    p = (char *)PGROUNDUP((uint64)pa_start);
-    for (; p + PGSIZE <= (char *)pa_end; p += PGSIZE) {
-        kmem.ref_count[PA2INDEX(p)] = 0;
-        struct run *r = (struct run *)p;
-        acquire(&kmem.lock);
-        r->next = kmem.freelist;
-        kmem.freelist = r;
-        release(&kmem.lock);
-    }
-}
-
-// Free the page of physical memory pointed at by v,
-// which normally should have been returned by a
-// call to kalloc().  (The exception is when
-// initializing the allocator; see kinit above.)
-void kfree(void *pa) {
+static void kfree_cpu(void *pa, int cpu_id) {
     struct run *r;
 
     if (((uint64)pa % PGSIZE) != 0 || (char *)pa < end || (uint64)pa >= PHYSTOP)
         panic("kfree");
 
-    acquire(&kmem.lock);
-    kmem.ref_count[PA2INDEX(pa)]--;
-    if (kmem.ref_count[PA2INDEX(pa)] == 0) {
-        memset(pa, 1, PGSIZE);
-        r = (struct run *)pa;
-        r->next = kmem.freelist;
-        kmem.freelist = r;
-    }
-    release(&kmem.lock);
+    memset(pa, 1, PGSIZE);
+    r = (struct run *)pa;
+
+    acquire(&kmems[cpu_id].lock);
+    r->next = kmems[cpu_id].freelist;
+    kmems[cpu_id].freelist = r;
+    release(&kmems[cpu_id].lock);
 }
 
-// Allocate one 4096-byte page of physical memory.
-// Returns a pointer that the kernel can use.
-// Returns 0 if the memory cannot be allocated.
-void *kalloc(void) {
-    struct run *r;
+void freerange(void *pa_start, void *pa_end) {
+    char *p;
 
-    acquire(&kmem.lock);
-    r = kmem.freelist;
-    if (r) {
-        kmem.freelist = r->next;
-        kmem.ref_count[PA2INDEX(r)] = 1;
+    p = (char *)PGROUNDUP((uint64)pa_start);
+    for (; p + PGSIZE <= (char *)pa_end; p += PGSIZE) {
+        page_refs.ref_count[PA2INDEX(p)] = 0;
+        kfree_cpu(p, 0);
     }
-    release(&kmem.lock);
+}
 
+void kfree(void *pa) {
+    int free_it = 0;
+
+    if (((uint64)pa % PGSIZE) != 0 || (char *)pa < end || (uint64)pa >= PHYSTOP)
+        panic("kfree");
+
+    acquire(&page_refs.lock);
+    page_refs.ref_count[PA2INDEX(pa)]--;
+    if (page_refs.ref_count[PA2INDEX(pa)] == 0)
+        free_it = 1;
+    release(&page_refs.lock);
+
+    if (!free_it)
+        return;
+
+    push_off();
+    int cpu_id = cpuid();
+    pop_off();
+    kfree_cpu(pa, cpu_id);
+}
+
+void *kalloc(void) {
+    struct run *r = 0;
+
+    push_off();
+    int cpu = cpuid();
+    pop_off();
+
+    acquire(&kmems[cpu].lock);
+    r = kmems[cpu].freelist;
     if (r)
-        memset((char *)r, 5, PGSIZE); // fill with junk
+        kmems[cpu].freelist = r->next;
+    release(&kmems[cpu].lock);
+
+    if (r == 0) {
+        for (int other_cpu = 0; other_cpu < NCPU; other_cpu++) {
+            if (other_cpu == cpu)
+                continue;
+
+            acquire(&kmems[other_cpu].lock);
+            r = kmems[other_cpu].freelist;
+            if (r)
+                kmems[other_cpu].freelist = r->next;
+            release(&kmems[other_cpu].lock);
+
+            if (r)
+                break;
+        }
+    }
+
+    if (r) {
+        acquire(&page_refs.lock);
+        page_refs.ref_count[PA2INDEX(r)] = 1;
+        release(&page_refs.lock);
+        memset((char *)r, 5, PGSIZE);
+    }
+
     return (void *)r;
 }
 
 void increase_ref(uint64 pa) {
-    acquire(&kmem.lock);
-    kmem.ref_count[PA2INDEX(pa)]++;
-    release(&kmem.lock);
+    acquire(&page_refs.lock);
+    page_refs.ref_count[PA2INDEX(pa)]++;
+    release(&page_refs.lock);
 }
 
 void decrease_ref(uint64 pa) {
-    acquire(&kmem.lock);
-    kmem.ref_count[PA2INDEX(pa)]--;
-    release(&kmem.lock);
+    acquire(&page_refs.lock);
+    page_refs.ref_count[PA2INDEX(pa)]--;
+    release(&page_refs.lock);
 }
 
 int get_ref(uint64 pa) {
-    acquire(&kmem.lock);
-    int ret = kmem.ref_count[PA2INDEX(pa)];
-    release(&kmem.lock);
+    int ret;
+
+    acquire(&page_refs.lock);
+    ret = page_refs.ref_count[PA2INDEX(pa)];
+    release(&page_refs.lock);
     return ret;
 }
 
 uint64 count_freemem(void) {
     struct run *r;
-    int cnt = 0;
+    uint64 cnt = 0;
 
-    acquire(&kmem.lock);
-    r = kmem.freelist;
-    while (r) {
-        cnt++;
-        r = r->next;
+    for (int i = 0; i < NCPU; i++) {
+        acquire(&kmems[i].lock);
+        r = kmems[i].freelist;
+        while (r) {
+            cnt++;
+            r = r->next;
+        }
+        release(&kmems[i].lock);
     }
-    release(&kmem.lock);
+
     return cnt * PGSIZE;
 }

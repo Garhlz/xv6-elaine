@@ -384,6 +384,7 @@ int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len) {
                 *pte &= ~PTE_COW;
                 *pte |= PTE_W;
             }
+            sfence_vma();
             pa0 = PTE2PA(*pte);
         }
 

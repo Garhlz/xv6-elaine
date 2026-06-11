@@ -12,11 +12,17 @@
 char *argv[] = {"sh", 0};
 
 int main(void) {
-    int pid, wpid;
+    int pid, wpid, fd;
 
     if (open("console", O_RDWR) < 0) {
         mknod("console", CONSOLE, 0);
         open("console", O_RDWR);
+    }
+    fd = open("statistics", O_RDONLY);
+    if (fd < 0) {
+        mknod("statistics", STATS, 0);
+    } else {
+        close(fd);
     }
     dup(0); // stdout
     dup(0); // stderr

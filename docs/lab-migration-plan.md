@@ -22,7 +22,7 @@
 - 优先迁移“实验必需代码”，跳过 `.vscode/`、格式化、临时文件、测试产物。
 - 每整合一个实验，就单独提交并跑对应测试。
 - `net` 已经在 `dev/all` 中，后续实验应以它为基线继续叠加。
-- 当前 `make grade-all` 已串联 `util → syscall → net → pgtbl → traps → cow → thread`，并复用一次统一构建产物。
+- 当前 `make grade-all` 已串联 `util → syscall → net → pgtbl → traps → cow → thread → lock`，并复用一次统一构建产物。
 
 ## 建议整合顺序
 
@@ -31,7 +31,7 @@
 3. `traps`（✅ 已完成）
 4. `cow`（✅ 已完成）
 5. `thread`（✅ 已完成）
-6. `lock`
+6. `lock`（✅ 已完成）
 7. `fs`
 8. `mmap`
 
@@ -70,7 +70,7 @@
 - `make grade-syscall`
 - `make grade-all`
 
-其中 `make grade-all` 会先统一构建一遍，再依次执行 `util → syscall → net → pgtbl → traps → cow → thread` 的 grader。
+其中 `make grade-all` 会先统一构建一遍，再依次执行 `util → syscall → net → pgtbl → traps → cow → thread → lock` 的 grader。
 
 注意：
 
@@ -102,7 +102,7 @@
 - `make grade-util`
 - `make grade-all`
 
-其中 `make grade-all` 会先统一构建一遍，再依次执行 `util → syscall → net → pgtbl → traps → cow → thread` 的 grader。
+其中 `make grade-all` 会先统一构建一遍，再依次执行 `util → syscall → net → pgtbl → traps → cow → thread → lock` 的 grader。
 
 ## pgtbl
 
@@ -140,7 +140,7 @@
 - `make grade-pgtbl`
 - `make grade-all`
 
-其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow → thread`（用户态 → 系统调用 → 驱动 → 内存管理 → 异常处理 → COW 内存管理 → 线程与并发练习）。
+其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow → thread → lock`（用户态 → 系统调用 → 驱动 → 内存管理 → 异常处理 → COW 内存管理 → 线程与并发练习 → 锁竞争优化）。
 
 注意：
 
@@ -181,7 +181,7 @@
 - `make grade-traps`
 - `make grade-all`
 
-其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow → thread`。
+其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow → thread → lock`。
 
 注意：
 
@@ -221,6 +221,7 @@
 - `PA2INDEX` 使用 `(pa - KERNBASE) / PGSIZE` 计算相对于 KERNBASE 的索引，不是绝对物理地址除以页大小。
 - 从 `sys_sleep` 移除了 `backtrace()` 调用，避免其输出干扰其他测试的行匹配。
 - `kfree` 改为引用计数语义：只在计数归零时才真正回收页面。
+- COW fault 和 `copyout()` 更新 PTE 后刷新 TLB；复制 COW 页后用 `kfree()` 释放旧物理页引用，避免并发退出路径把引用数降到 0 但未回收到 freelist。
 
 ## thread
 
@@ -285,30 +286,42 @@
 
 ## lock
 
-官方内容：两部分：
+当前状态：已整合到 `dev/all`。
 
-1. 重构物理页分配器，降低 `kmem` 锁竞争
-2. 重构 buffer cache，降低 `bcache` 锁竞争
+官方内容：两部分：重构物理页分配器为 per-CPU freelist 降低 kmem 锁竞争、重构 buffer cache 为 hash bucket 降低 bcache 锁竞争。
 
-建议迁移文件：
+实际迁移文件：
 
 - `kernel/kalloc.c`
 - `kernel/bio.c`
 - `kernel/buf.h`
 - `kernel/spinlock.h`
 - `kernel/spinlock.c`
+- `kernel/defs.h`
+- `kernel/param.h`
+- `kernel/main.c`
+- `kernel/proc.c`
+- `kernel/sysnet.c`
+- `kernel/pipe.c`
+- `kernel/sprintf.c`
+- `kernel/stats.c`
 - `user/kalloctest.c`
 - `user/bcachetest.c`
-- `Makefile`
-
-本地分支额外文件：
-
-- `kernel/stats.c`
-- `kernel/sprintf.c`
 - `user/stats.c`
 - `user/statistics.c`
+- `Makefile`
+- `grade-lab-lock`
 
-这些更像你自己的扩展或调试辅助，建议在第一轮整合时先不迁移。
+验证方式：
+
+- `make grade-lock`
+- `make grade-all`
+
+注意：
+
+- `kalloc.c` 同时包含 cow 的引用计数和 lock 的 per-CPU freelist。`kmems[NCPU]` 管理 per-CPU 空闲链表，`page_refs` 管理共享的引用计数数组。两个子系统用不同的锁保护。
+- `bio.c` 用 29 个 hash bucket 替代单一的 bcache 锁，命中路径只锁目标 bucket；miss/evict 路径用 `bcache_evict` 串行化 victim 选择和跨 bucket 迁移，避免重复缓存同一 block 或无锁读取 `refcnt`。
+- cowtest 超时从默认 30s 增加到 120s（per-CPU freelist 下 steal 略慢）。
 
 ## fs
 

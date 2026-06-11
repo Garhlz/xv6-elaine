@@ -132,6 +132,7 @@ void pop_off(void);
 uint64 lockfree_read8(uint64 *addr);
 int lockfree_read4(int *addr);
 void freelock(struct spinlock *);
+int statslock(char *, int);
 
 // sleeplock.c
 void acquiresleep(struct sleeplock *);
@@ -210,7 +211,6 @@ int copyinstr_new(pagetable_t, char *, uint64, uint64);
 
 // stats.c
 void statsinit(void);
-void statsinc(void);
 
 // sprintf.c
 int snprintf(char *, int, char *, ...);

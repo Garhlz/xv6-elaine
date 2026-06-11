@@ -67,8 +67,10 @@ int sockalloc(struct file **f, uint32 raddr, uint16 lport, uint16 rport) {
     return 0;
 
 bad:
-    if (si)
+    if (si) {
+        freelock(&si->lock);
         kfree((char *)si);
+    }
     if (*f)
         fileclose(*f);
     return -1;
@@ -96,6 +98,7 @@ void sockclose(struct sock *si) {
         mbuffree(m);
     }
 
+    freelock(&si->lock);
     kfree((char *)si);
 }
 

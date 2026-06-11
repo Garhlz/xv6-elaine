@@ -14,133 +14,182 @@
 //     so do not keep them longer than necessary.
 
 #include "types.h"
-#include "riscv.h"
-#include "defs.h"
 #include "param.h"
 #include "spinlock.h"
 #include "sleeplock.h"
+#include "riscv.h"
+#include "defs.h"
 #include "fs.h"
 #include "buf.h"
 
-struct {
-    struct spinlock lock;
-    struct buf buf[NBUF];
+#define NBUCKET 29
+#define BUCKET_HASH(blockno) ((blockno) % NBUCKET)
 
-    // Linked list of all buffers, through prev/next.
-    // Sorted by how recently the buffer was used.
-    // head.next is most recent, head.prev is least.
-    struct buf head;
+struct {
+    struct spinlock evict_lock;
+    struct spinlock locks[NBUCKET];
+    struct buf buf[NBUF];
+    struct buf buckets[NBUCKET];
 } bcache;
+
+static char bcache_lock_names[NBUCKET][16];
 
 void binit(void) {
     struct buf *b;
 
-    initlock(&bcache.lock, "bcache");
+    initlock(&bcache.evict_lock, "bcache_evict");
+    for (int i = 0; i < NBUCKET; i++) {
+        snprintf(bcache_lock_names[i], sizeof(bcache_lock_names[i]), "bcache_%d", i);
+        initlock(&bcache.locks[i], bcache_lock_names[i]);
+        bcache.buckets[i].prev = &bcache.buckets[i];
+        bcache.buckets[i].next = &bcache.buckets[i];
+    }
 
-    // Create linked list of buffers
-    bcache.head.prev = &bcache.head;
-    bcache.head.next = &bcache.head;
     for (b = bcache.buf; b < bcache.buf + NBUF; b++) {
-        b->next = bcache.head.next;
-        b->prev = &bcache.head;            // 插入这块缓存
-        initsleeplock(&b->lock, "buffer"); // 每块对应一个锁
-        bcache.head.next->prev = b;        // 双向循环链表
-        bcache.head.next = b;
+        b->next = bcache.buckets[0].next;
+        b->prev = &bcache.buckets[0];
+        initsleeplock(&b->lock, "buffer");
+        bcache.buckets[0].next->prev = b;
+        bcache.buckets[0].next = b;
     }
 }
 
-// Look through buffer cache for block on device dev.
-// If not found, allocate a buffer.
-// In either case, return locked buffer.
-// 从缓存中获取一个物理块，如果缓存不命中，就返回LRU的缓存块
-// 返回的是已经上锁的buffer块
-static struct buf *bget(uint dev, uint blockno) {
+static int buf_in_bucket(struct buf *target, int bucket_idx) {
     struct buf *b;
 
-    acquire(&bcache.lock);
+    for (b = bcache.buckets[bucket_idx].next; b != &bcache.buckets[bucket_idx]; b = b->next) {
+        if (b == target)
+            return 1;
+    }
+    return 0;
+}
 
-    // Is the block already cached?
-    for (b = bcache.head.next; b != &bcache.head; b = b->next) {
+static struct buf *bget(uint dev, uint blockno) {
+    struct buf *b;
+    int bucket_idx = BUCKET_HASH(blockno);
+
+    // Hits only need the target bucket lock.
+    acquire(&bcache.locks[bucket_idx]);
+    for (b = bcache.buckets[bucket_idx].next; b != &bcache.buckets[bucket_idx]; b = b->next) {
         if (b->dev == dev && b->blockno == blockno) {
             b->refcnt++;
-            release(&bcache.lock);
+            release(&bcache.locks[bucket_idx]);
             acquiresleep(&b->lock);
             return b;
         }
     }
+    release(&bcache.locks[bucket_idx]);
 
-    // Not cached.
-    // Recycle the least recently used (LRU) unused buffer.
-    // 从双向循环链表末尾获取一块buffer, 自然就是LRU的
-    for (b = bcache.head.prev; b != &bcache.head; b = b->prev) {
-        if (b->refcnt == 0) {
-            b->dev = dev;
-            b->blockno = blockno;
-            b->valid = 0;
-            b->refcnt = 1;
-            release(&bcache.lock);
-            acquiresleep(&b->lock); // 返回之前都要上锁
+    acquire(&bcache.evict_lock);
+
+retry:
+    // Another CPU may have installed this block while we waited.
+    acquire(&bcache.locks[bucket_idx]);
+    for (b = bcache.buckets[bucket_idx].next; b != &bcache.buckets[bucket_idx]; b = b->next) {
+        if (b->dev == dev && b->blockno == blockno) {
+            b->refcnt++;
+            release(&bcache.locks[bucket_idx]);
+            release(&bcache.evict_lock);
+            acquiresleep(&b->lock);
             return b;
         }
     }
-    panic("bget: no buffers");
+    release(&bcache.locks[bucket_idx]);
+
+    struct buf *victim = 0;
+    int old_bucket_idx = -1;
+    uint oldest_ts = 0xffffffff;
+    for (int i = 0; i < NBUCKET; i++) {
+        acquire(&bcache.locks[i]);
+        for (b = bcache.buckets[i].next; b != &bcache.buckets[i]; b = b->next) {
+            if (b->refcnt == 0 && (victim == 0 || b->timestamp < oldest_ts)) {
+                victim = b;
+                old_bucket_idx = i;
+                oldest_ts = b->timestamp;
+            }
+        }
+        release(&bcache.locks[i]);
+    }
+
+    if (victim == 0) {
+        release(&bcache.evict_lock);
+        panic("bget: no buffers");
+    }
+
+    acquire(&bcache.locks[old_bucket_idx]);
+    if (victim->refcnt != 0 || BUCKET_HASH(victim->blockno) != old_bucket_idx ||
+        !buf_in_bucket(victim, old_bucket_idx)) {
+        release(&bcache.locks[old_bucket_idx]);
+        goto retry;
+    }
+    victim->next->prev = victim->prev;
+    victim->prev->next = victim->next;
+    release(&bcache.locks[old_bucket_idx]);
+
+    acquire(&bcache.locks[bucket_idx]);
+    victim->dev = dev;
+    victim->blockno = blockno;
+    victim->valid = 0;
+    victim->refcnt = 1;
+    victim->timestamp = 0;
+
+    victim->next = bcache.buckets[bucket_idx].next;
+    victim->prev = &bcache.buckets[bucket_idx];
+    bcache.buckets[bucket_idx].next->prev = victim;
+    bcache.buckets[bucket_idx].next = victim;
+
+    release(&bcache.locks[bucket_idx]);
+    release(&bcache.evict_lock);
+
+    acquiresleep(&victim->lock);
+    return victim;
 }
 
-// Return a locked buf with the contents of the indicated block.
-// 返回缓存块，如果没有命中就从磁盘读数据
 struct buf *bread(uint dev, uint blockno) {
     struct buf *b;
 
     b = bget(dev, blockno);
     if (!b->valid) {
-        // 如果内容是过时的（缓存不命中）
-        // 就会让磁盘驱动去把最新的数据读进来
         virtio_disk_rw(b, 0);
         b->valid = 1;
     }
     return b;
 }
 
-// Write b's contents to disk.  Must be locked.
-// 因为buf本质上仍然是内存（内核）中的数据，需要调用函数写到磁盘中
-// 每次出现bwrite,就意味着出现了实质性的磁盘写入
 void bwrite(struct buf *b) {
     if (!holdingsleep(&b->lock))
         panic("bwrite");
     virtio_disk_rw(b, 1);
 }
 
-// Release a locked buffer.
-// Move to the head of the most-recently-used list.
 void brelse(struct buf *b) {
+    int bucket_idx;
+
     if (!holdingsleep(&b->lock))
         panic("brelse");
 
     releasesleep(&b->lock);
 
-    acquire(&bcache.lock);
+    bucket_idx = BUCKET_HASH(b->blockno);
+    acquire(&bcache.locks[bucket_idx]);
     b->refcnt--;
-    if (b->refcnt == 0) {
-        // no one is waiting for it.
-        b->next->prev = b->prev;
-        b->prev->next = b->next;
-        b->next = bcache.head.next; // 将这一块移动到链表头部
-        b->prev = &bcache.head;
-        bcache.head.next->prev = b;
-        bcache.head.next = b;
-    }
-
-    release(&bcache.lock);
+    if (b->refcnt == 0)
+        b->timestamp = ticks;
+    release(&bcache.locks[bucket_idx]);
 }
 
 void bpin(struct buf *b) {
-    acquire(&bcache.lock);
+    int bucket_idx = BUCKET_HASH(b->blockno);
+
+    acquire(&bcache.locks[bucket_idx]);
     b->refcnt++;
-    release(&bcache.lock);
+    release(&bcache.locks[bucket_idx]);
 }
 
 void bunpin(struct buf *b) {
-    acquire(&bcache.lock);
+    int bucket_idx = BUCKET_HASH(b->blockno);
+
+    acquire(&bcache.locks[bucket_idx]);
     b->refcnt--;
-    release(&bcache.lock);
+    release(&bcache.locks[bucket_idx]);
 }
