@@ -109,6 +109,12 @@ static struct proc *allocproc(void) {
 found:
     p->pid = allocpid();
     p->state = USED;
+    p->tracemask = 0;
+    p->alarm_interval = 0;
+    p->alarm_handler = 0;
+    p->alarm_ticks_left = 0;
+    memset(&p->alarm_trapframe_backup, 0, sizeof(p->alarm_trapframe_backup));
+    p->in_alarm = 0;
 
     // Allocate a trapframe page.
     if ((p->trapframe = (struct trapframe *)kalloc()) == 0) {
@@ -162,6 +168,12 @@ static void freeproc(struct proc *p) {
     p->chan = 0;
     p->killed = 0;
     p->xstate = 0;
+    p->tracemask = 0;
+    p->alarm_interval = 0;
+    p->alarm_handler = 0;
+    p->alarm_ticks_left = 0;
+    memset(&p->alarm_trapframe_backup, 0, sizeof(p->alarm_trapframe_backup));
+    p->in_alarm = 0;
     p->state = UNUSED;
 }
 
@@ -625,8 +637,10 @@ uint64 count_nproc(void) {
     int cnt = 0;
     struct proc *p;
     for (p = proc; p < &proc[NPROC]; p++) {
+        acquire(&p->lock);
         if (p->state != UNUSED)
             cnt++;
+        release(&p->lock);
     }
     return cnt;
 }

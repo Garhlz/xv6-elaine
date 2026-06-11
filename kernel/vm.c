@@ -292,11 +292,14 @@ int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz) {
         pa = PTE2PA(*pte);
         flags = PTE_FLAGS(*pte);
 
-        // Mark both parent and child PTEs as read-only with COW.
-        *pte &= ~PTE_W;
-        *pte |= PTE_COW;
-        flags &= ~PTE_W;
-        flags |= PTE_COW;
+        // Only writable pages participate in copy-on-write. Read-only
+        // mappings should remain read-only in both parent and child.
+        if (flags & PTE_W) {
+            *pte &= ~PTE_W;
+            *pte |= PTE_COW;
+            flags &= ~PTE_W;
+            flags |= PTE_COW;
+        }
 
         if (mappages(new, i, PGSIZE, pa, flags) != 0)
             goto err;
@@ -353,8 +356,10 @@ int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len) {
 
     while (len > 0) {
         va0 = PGROUNDDOWN(dstva);
+        if (va0 >= MAXVA)
+            return -1;
         pte_t *pte = walk(pagetable, va0, 0);
-        if (pte == 0 || (*pte & PTE_V) == 0)
+        if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
             return -1;
         pa0 = PTE2PA(*pte);
         if (pa0 == 0)

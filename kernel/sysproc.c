@@ -109,13 +109,15 @@ uint64 sys_sysinfo(void) {
 }
 
 // Return the access bits for the given range of user pages.
-int sys_pgaccess(void) {
+uint64 sys_pgaccess(void) {
     uint64 start_addr;
     if (argaddr(0, &start_addr) < 0)
         return -1;
 
     int num_pages;
     if (argint(1, &num_pages) < 0)
+        return -1;
+    if (num_pages < 0 || num_pages > 32)
         return -1;
 
     uint64 user_buf_addr;
@@ -134,7 +136,8 @@ int sys_pgaccess(void) {
 
         *pte &= (~PTE_A);
     }
-    copyout(myproc()->pagetable, user_buf_addr, (char *)&mask, sizeof(mask));
+    if (copyout(myproc()->pagetable, user_buf_addr, (char *)&mask, sizeof(mask)) < 0)
+        return -1;
 
     return 0;
 }

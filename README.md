@@ -47,6 +47,18 @@ make qemu
 make qemu-gdb
 ```
 
+### 启动带宿主机 UDP 转发的 xv6
+
+```bash
+make qemu-net
+```
+
+如果需要在 GDB 模式下调试带转发的网络环境，使用：
+
+```bash
+make qemu-gdb-net
+```
+
 ### 运行当前实验评分
 
 ```bash
@@ -87,9 +99,10 @@ make qemu
 nettests
 ```
 
-也可以从宿主机发送一个测试包：
+如果要从宿主机主动向 xv6 转发端口发送测试包，需要使用带 UDP 转发的 QEMU：
 
 ```bash
+make qemu-net
 make ping
 ```
 
@@ -97,5 +110,6 @@ make ping
 
 - `make grade` 会调用当前 `LAB` 对应的 grader；现在默认是 `grade-lab-net`。
 - `make grade-util`、`make grade-syscall`、`make grade-net`、`make grade-pgtbl`、`make grade-traps`、`make grade-cow`、`make grade-all` 适合 `dev/all` 分支上的阶段性回归验证。
+- 默认的 `make qemu` / `make qemu-gdb` 不启用宿主机到 xv6 的 UDP 端口转发；只有 `make qemu-net` / `make qemu-gdb-net` 会打开 `hostfwd=udp::$(FWDPORT)-:2000`，避免非网络实验的评分过程额外依赖端口绑定。
 - 生成文件如 `fs.img`、`kernel/kernel`、`*.o`、`*.asm`、`*.sym`、`packets.pcap` 不应当作为源码提交。
 - 当前仓库已经补充了 `clangd` / `clang-format` / `compile_commands.json` 相关配置，适合继续做代码阅读和实验回顾。

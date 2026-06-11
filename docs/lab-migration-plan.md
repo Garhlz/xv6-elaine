@@ -22,6 +22,7 @@
 - 优先迁移“实验必需代码”，跳过 `.vscode/`、格式化、临时文件、测试产物。
 - 每整合一个实验，就单独提交并跑对应测试。
 - `net` 已经在 `dev/all` 中，后续实验应以它为基线继续叠加。
+- 当前 `make grade-all` 已串联 `util → syscall → net → pgtbl → traps → cow`，并复用一次统一构建产物。
 
 ## 建议整合顺序
 
@@ -69,7 +70,7 @@
 - `make grade-syscall`
 - `make grade-all`
 
-其中 `make grade-all` 会先统一构建一遍，再依次执行 `util`、`net` 与 `syscall` 的 grader。
+其中 `make grade-all` 会先统一构建一遍，再依次执行 `util → syscall → net → pgtbl → traps → cow` 的 grader。
 
 注意：
 
@@ -101,7 +102,7 @@
 - `make grade-util`
 - `make grade-all`
 
-其中 `make grade-all` 会先统一构建一遍，再依次执行 `util` 与 `net` 的 grader。
+其中 `make grade-all` 会先统一构建一遍，再依次执行 `util → syscall → net → pgtbl → traps → cow` 的 grader。
 
 ## pgtbl
 
@@ -139,7 +140,7 @@
 - `make grade-pgtbl`
 - `make grade-all`
 
-其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl`（用户态 → 系统调用 → 驱动 → 内存管理）。
+其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow`（用户态 → 系统调用 → 驱动 → 内存管理 → 异常处理 → COW 内存管理）。
 
 注意：
 
@@ -180,7 +181,7 @@
 - `make grade-traps`
 - `make grade-all`
 
-其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps`。
+其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow`。
 
 注意：
 
@@ -267,6 +268,11 @@
 - `server.py`
 - `ping.py`
 - `Makefile`
+
+注意：
+
+- `make grade-net` 和 `make grade-all` 里的 `nettests` 只需要 guest -> host 的 UDP 通路，不依赖宿主机到 xv6 的 `hostfwd`。
+- 只有宿主机主动向 xv6 发送 UDP 数据时，才需要使用 `make qemu-net` 或 `make qemu-gdb-net` 打开 `hostfwd=udp::$(FWDPORT)-:2000`。
 
 ## lock
 

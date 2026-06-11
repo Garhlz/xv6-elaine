@@ -102,11 +102,15 @@ int get_ref(uint64 pa) {
 }
 
 uint64 count_freemem(void) {
-    struct run *r = kmem.freelist;
+    struct run *r;
     int cnt = 0;
+
+    acquire(&kmem.lock);
+    r = kmem.freelist;
     while (r) {
         cnt++;
         r = r->next;
     }
+    release(&kmem.lock);
     return cnt * PGSIZE;
 }

@@ -271,17 +271,25 @@ ifeq ($(LAB),fs)
 CPUS := 1
 endif
 
-FWDPORT = $(shell expr `id -u` % 5000 + 25999)
+FWDPORT ?= $(shell expr `id -u` % 5000 + 25999)
+NETFWD ?= 0
 
 QEMUOPTS = -machine virt -bios none -kernel $K/kernel -m 128M -smp $(CPUS) -nographic
 QEMUOPTS += -drive file=fs.img,if=none,format=raw,id=x0
 QEMUOPTS += -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0
 
+ifeq ($(NETFWD),1)
 QEMUOPTS += -netdev user,id=net0,hostfwd=udp::$(FWDPORT)-:2000 -object filter-dump,id=net0,netdev=net0,file=packets.pcap
+else
+QEMUOPTS += -netdev user,id=net0
+endif
 QEMUOPTS += -device e1000,netdev=net0,bus=pcie.0
 
 qemu: $K/kernel fs.img
 	$(QEMU) $(QEMUOPTS)
+
+qemu-net: NETFWD=1
+qemu-net: qemu
 
 .gdbinit: .gdbinit.tmpl-riscv
 	sed "s/:1234/:$(GDBPORT)/" < $^ > $@
@@ -289,6 +297,9 @@ qemu: $K/kernel fs.img
 qemu-gdb: $K/kernel .gdbinit fs.img
 	@echo "*** Now run 'gdb' in another window." 1>&2
 	$(QEMU) $(QEMUOPTS) -S $(QEMUGDB)
+
+qemu-gdb-net: NETFWD=1
+qemu-gdb-net: qemu-gdb
 
 # try to generate a unique port for the echo server
 SERVERPORT = $(shell expr `id -u` % 5000 + 25099)
@@ -353,17 +364,17 @@ grade-cow:
 	./grade-lab-cow $(GRADEFLAGS)
 
 grade-all:
-	@echo $(MAKE) clean
-	@$(MAKE) clean || \
-          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
-	@echo $(MAKE) .gdbinit fs.img
-	@$(MAKE) .gdbinit fs.img || \
-          (echo "'make .gdbinit fs.img' failed." && exit 1)
-	./grade-lab-util --no-make $(GRADEFLAGS)
-	./grade-lab-syscall --no-make $(GRADEFLAGS)
-	./grade-lab-net --no-make $(GRADEFLAGS)
-	./grade-lab-pgtbl --no-make $(GRADEFLAGS)
-	./grade-lab-traps --no-make $(GRADEFLAGS)
+	@echo $(MAKE) clean; \
+	$(MAKE) clean || \
+          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1); \
+	echo $(MAKE) .gdbinit fs.img; \
+	$(MAKE) .gdbinit fs.img || \
+          (echo "'make .gdbinit fs.img' failed." && exit 1); \
+	./grade-lab-util --no-make $(GRADEFLAGS); \
+	./grade-lab-syscall --no-make $(GRADEFLAGS); \
+	./grade-lab-net --no-make $(GRADEFLAGS); \
+	./grade-lab-pgtbl --no-make $(GRADEFLAGS); \
+	./grade-lab-traps --no-make $(GRADEFLAGS); \
 	./grade-lab-cow --no-make $(GRADEFLAGS)
 
 .PHONY: clean grade
