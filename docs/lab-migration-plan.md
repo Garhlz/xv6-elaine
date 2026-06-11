@@ -22,7 +22,7 @@
 - 优先迁移“实验必需代码”，跳过 `.vscode/`、格式化、临时文件、测试产物。
 - 每整合一个实验，就单独提交并跑对应测试。
 - `net` 已经在 `dev/all` 中，后续实验应以它为基线继续叠加。
-- 当前 `make grade-all` 已串联 `util → syscall → net → pgtbl → traps → cow`，并复用一次统一构建产物。
+- 当前 `make grade-all` 已串联 `util → syscall → net → pgtbl → traps → cow → thread`，并复用一次统一构建产物。
 
 ## 建议整合顺序
 
@@ -30,7 +30,7 @@
 2. `pgtbl`（✅ 已完成）
 3. `traps`（✅ 已完成）
 4. `cow`（✅ 已完成）
-5. `thread`
+5. `thread`（✅ 已完成）
 6. `lock`
 7. `fs`
 8. `mmap`
@@ -70,7 +70,7 @@
 - `make grade-syscall`
 - `make grade-all`
 
-其中 `make grade-all` 会先统一构建一遍，再依次执行 `util → syscall → net → pgtbl → traps → cow` 的 grader。
+其中 `make grade-all` 会先统一构建一遍，再依次执行 `util → syscall → net → pgtbl → traps → cow → thread` 的 grader。
 
 注意：
 
@@ -102,7 +102,7 @@
 - `make grade-util`
 - `make grade-all`
 
-其中 `make grade-all` 会先统一构建一遍，再依次执行 `util → syscall → net → pgtbl → traps → cow` 的 grader。
+其中 `make grade-all` 会先统一构建一遍，再依次执行 `util → syscall → net → pgtbl → traps → cow → thread` 的 grader。
 
 ## pgtbl
 
@@ -140,7 +140,7 @@
 - `make grade-pgtbl`
 - `make grade-all`
 
-其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow`（用户态 → 系统调用 → 驱动 → 内存管理 → 异常处理 → COW 内存管理）。
+其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow → thread`（用户态 → 系统调用 → 驱动 → 内存管理 → 异常处理 → COW 内存管理 → 线程与并发练习）。
 
 注意：
 
@@ -181,7 +181,7 @@
 - `make grade-traps`
 - `make grade-all`
 
-其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow`。
+其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow → thread`。
 
 注意：
 
@@ -224,24 +224,33 @@
 
 ## thread
 
+当前状态：已整合到 `dev/all`。
+
 官方内容：三部分：
 
 1. `user/uthread.c` 和 `user/uthread_switch.S`：实现用户级线程切换
 2. `notxv6/ph.c`：用 pthread 优化哈希表并发
 3. `notxv6/barrier.c`：实现 barrier
 
-建议迁移文件：
+实际迁移文件：
 
 - `user/uthread.c`
 - `user/uthread_switch.S`
 - `notxv6/ph.c`
 - `notxv6/barrier.c`
 - `Makefile`
+- `grade-lab-thread`
+
+验证方式：
+
+- `make grade-thread`
+- `make grade-all`
 
 注意：
 
 - 后两部分运行在宿主机，不在 xv6 内核里。
 - 这个实验对 `dev/all` 的内核整合价值较低，但对课程复习仍有帮助。
+- 迁移后移除了 `LAB=thread` 守卫，`_uthread`、`ph`、`barrier` 和 `grade-lab-thread` 在 `dev/all` 中直接可用。
 
 ## net
 

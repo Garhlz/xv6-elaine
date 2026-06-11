@@ -1,6 +1,6 @@
 # xv6-labs-2021
 
-这是一个基于 MIT 6.S081 / 6.828 2021 课程的 xv6-riscv 实验仓库。当前活动实验配置位于 `conf/lab.mk`，现在是 `LAB=net`；`dev/all` 分支上已经整合了 `util`、`syscall`、`pgtbl`、`traps` 和 `cow` 实验。
+这是一个基于 MIT 6.S081 / 6.828 2021 课程的 xv6-riscv 实验仓库。当前活动实验配置位于 `conf/lab.mk`，现在是 `LAB=net`；`dev/all` 分支上已经整合了 `util`、`syscall`、`pgtbl`、`traps`、`cow` 和 `thread` 实验。
 
 ## 目录说明
 
@@ -15,6 +15,7 @@
   - `grade-lab-pgtbl`
   - `grade-lab-traps`
   - `grade-lab-cow`
+  - `grade-lab-thread`
   - `gradelib.py`
   - `server.py`
   - `ping.py`
@@ -74,10 +75,11 @@ make grade-net
 make grade-pgtbl
 make grade-traps
 make grade-cow
+make grade-thread
 make grade-all
 ```
 
-`make grade-all` 会先统一清理并构建一次系统产物，然后依次运行 `util` → `syscall` → `net` → `pgtbl` → `traps` → `cow` 的 grader；测试过程中仍会按用例重复启动 QEMU，但不会重复执行整仓库构建。
+`make grade-all` 会先统一清理并构建一次系统产物，然后依次运行 `util` → `syscall` → `net` → `pgtbl` → `traps` → `cow` → `thread` 的 grader；测试过程中仍会按用例重复启动 QEMU，但不会重复执行整仓库构建。
 
 ### net lab 手工测试
 
@@ -109,7 +111,7 @@ make ping
 ## 说明
 
 - `make grade` 会调用当前 `LAB` 对应的 grader；现在默认是 `grade-lab-net`。
-- `make grade-util`、`make grade-syscall`、`make grade-net`、`make grade-pgtbl`、`make grade-traps`、`make grade-cow`、`make grade-all` 适合 `dev/all` 分支上的阶段性回归验证。
+- `make grade-util`、`make grade-syscall`、`make grade-net`、`make grade-pgtbl`、`make grade-traps`、`make grade-cow`、`make grade-thread`、`make grade-all` 适合 `dev/all` 分支上的阶段性回归验证。
 - 默认的 `make qemu` / `make qemu-gdb` 不启用宿主机到 xv6 的 UDP 端口转发；只有 `make qemu-net` / `make qemu-gdb-net` 会打开 `hostfwd=udp::$(FWDPORT)-:2000`，避免非网络实验的评分过程额外依赖端口绑定。
 - 生成文件如 `fs.img`、`kernel/kernel`、`*.o`、`*.asm`、`*.sym`、`packets.pcap` 不应当作为源码提交。
 - 当前仓库已经补充了 `clangd` / `clang-format` / `compile_commands.json` 相关配置，适合继续做代码阅读和实验回顾。

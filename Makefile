@@ -195,6 +195,7 @@ UPROGS=\
 	$U/_alarmtest\
 	$U/_nettests\
 	$U/_cowtest\
+	$U/_uthread\
 
 
 
@@ -209,10 +210,6 @@ UPROGS += \
 	$U/_lazytests
 endif
 
-ifeq ($(LAB),thread)
-UPROGS += \
-	$U/_uthread
-
 $U/uthread_switch.o : $U/uthread_switch.S
 	$(CC) $(CFLAGS) -c -o $U/uthread_switch.o $U/uthread_switch.S
 
@@ -225,7 +222,6 @@ ph: notxv6/ph.c
 
 barrier: notxv6/barrier.c
 	gcc -o barrier -g -O2 $(XCFLAGS) notxv6/barrier.c -pthread
-endif
 
 ifeq ($(LAB),lock)
 UPROGS += \
@@ -363,6 +359,12 @@ grade-cow:
           (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
 	./grade-lab-cow $(GRADEFLAGS)
 
+grade-thread:
+	@echo $(MAKE) clean
+	@$(MAKE) clean || \
+          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
+	./grade-lab-thread $(GRADEFLAGS)
+
 grade-all:
 	@echo $(MAKE) clean; \
 	$(MAKE) clean || \
@@ -375,6 +377,7 @@ grade-all:
 	./grade-lab-net --no-make $(GRADEFLAGS); \
 	./grade-lab-pgtbl --no-make $(GRADEFLAGS); \
 	./grade-lab-traps --no-make $(GRADEFLAGS); \
-	./grade-lab-cow --no-make $(GRADEFLAGS)
+	./grade-lab-cow --no-make $(GRADEFLAGS); \
+	./grade-lab-thread --no-make $(GRADEFLAGS)
 
 .PHONY: clean grade
