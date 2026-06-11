@@ -47,6 +47,8 @@ uint64 sys_sleep(void) {
     int n;
     uint ticks0;
 
+    backtrace();
+
     if (argint(0, &n) < 0)
         return -1;
     acquire(&tickslock);
@@ -137,4 +139,28 @@ int sys_pgaccess(void) {
     copyout(myproc()->pagetable, user_buf_addr, (char *)&mask, sizeof(mask));
 
     return 0;
+}
+
+uint64 sys_sigalarm(void) {
+    int interval;
+    uint64 handler_addr;
+    if (argint(0, &interval) < 0)
+        return -1;
+    if (argaddr(1, &handler_addr) < 0)
+        return -1;
+    acquire(&myproc()->lock);
+    myproc()->alarm_interval = interval;
+    myproc()->alarm_handler = handler_addr;
+    myproc()->alarm_ticks_left = interval;
+    release(&myproc()->lock);
+    return 0;
+}
+
+uint64 sys_sigreturn(void) {
+    struct proc *p = myproc();
+    acquire(&p->lock);
+    *(p->trapframe) = p->alarm_trapframe_backup;
+    p->in_alarm = 0;
+    release(&p->lock);
+    return p->trapframe->a0;
 }

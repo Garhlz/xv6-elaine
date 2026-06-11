@@ -30,7 +30,11 @@ OBJS = \
   $K/sysfile.o \
   $K/kernelvec.o \
   $K/plic.o \
-  $K/virtio_disk.o
+  $K/virtio_disk.o \
+  $K/e1000.o \
+  $K/net.o \
+  $K/sysnet.o \
+  $K/pci.o
 
 OBJS_KCSAN = \
   $K/start.o \
@@ -51,13 +55,6 @@ OBJS += \
 endif
 
 
-ifeq ($(LAB),net)
-OBJS += \
-	$K/e1000.o \
-	$K/net.o \
-	$K/sysnet.o \
-	$K/pci.o
-endif
 
 
 # riscv64-unknown-elf- or riscv64-linux-gnu-
@@ -100,9 +97,7 @@ CFLAGS += -ffreestanding -fno-common -nostdlib -mno-relax
 CFLAGS += -I.
 CFLAGS += $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
 
-ifeq ($(LAB),net)
 CFLAGS += -DNET_TESTS_PORT=$(SERVERPORT)
-endif
 
 ifdef KCSAN
 CFLAGS += -DKCSAN
@@ -196,6 +191,9 @@ UPROGS=\
 	$U/_trace\
 	$U/_sysinfotest\
 	$U/_pgtbltest\
+	$U/_bttest\
+	$U/_alarmtest\
+	$U/_nettests\
 
 
 
@@ -203,12 +201,6 @@ UPROGS=\
 ifeq ($(LAB),$(filter $(LAB), lock))
 UPROGS += \
 	$U/_stats
-endif
-
-ifeq ($(LAB),traps)
-UPROGS += \
-	$U/_call\
-	$U/_bttest
 endif
 
 ifeq ($(LAB),lazy)
@@ -252,11 +244,6 @@ endif
 
 
 
-ifeq ($(LAB),net)
-UPROGS += \
-	$U/_nettests
-endif
-
 UEXTRA=
 UEXTRA += user/xargstest.sh
 
@@ -294,10 +281,8 @@ QEMUOPTS = -machine virt -bios none -kernel $K/kernel -m 128M -smp $(CPUS) -nogr
 QEMUOPTS += -drive file=fs.img,if=none,format=raw,id=x0
 QEMUOPTS += -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0
 
-ifeq ($(LAB),net)
 QEMUOPTS += -netdev user,id=net0,hostfwd=udp::$(FWDPORT)-:2000 -object filter-dump,id=net0,netdev=net0,file=packets.pcap
 QEMUOPTS += -device e1000,netdev=net0,bus=pcie.0
-endif
 
 qemu: $K/kernel fs.img
 	$(QEMU) $(QEMUOPTS)
@@ -309,7 +294,6 @@ qemu-gdb: $K/kernel .gdbinit fs.img
 	@echo "*** Now run 'gdb' in another window." 1>&2
 	$(QEMU) $(QEMUOPTS) -S $(QEMUGDB)
 
-ifeq ($(LAB),net)
 # try to generate a unique port for the echo server
 SERVERPORT = $(shell expr `id -u` % 5000 + 25099)
 
@@ -318,7 +302,6 @@ server:
 
 ping:
 	python3 ping.py $(FWDPORT)
-endif
 
 ##
 ##  FOR testing lab grading script
@@ -361,6 +344,12 @@ grade-pgtbl:
           (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
 	./grade-lab-pgtbl $(GRADEFLAGS)
 
+grade-traps:
+	@echo $(MAKE) clean
+	@$(MAKE) clean || \
+          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
+	./grade-lab-traps $(GRADEFLAGS)
+
 grade-all:
 	@echo $(MAKE) clean
 	@$(MAKE) clean || \
@@ -372,6 +361,7 @@ grade-all:
 	./grade-lab-syscall --no-make $(GRADEFLAGS)
 	./grade-lab-net --no-make $(GRADEFLAGS)
 	./grade-lab-pgtbl --no-make $(GRADEFLAGS)
+	./grade-lab-traps --no-make $(GRADEFLAGS)
 
 ##
 ## FOR web handin

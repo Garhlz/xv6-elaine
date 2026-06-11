@@ -24,11 +24,11 @@ int getpid(void);
 char *sbrk(int);
 int sleep(int);
 int uptime(void);
-#ifdef LAB_NET
 int connect(uint32, uint16, uint16);
-#endif
 int pgaccess(void *base, int len, void *mask);
 int ugetpid(void);
+int sigalarm(int ticks, void (*handler)());
+int sigreturn(void);
 
 // ulib.c
 int stat(const char *, struct stat *);

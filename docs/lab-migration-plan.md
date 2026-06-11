@@ -27,7 +27,7 @@
 
 1. `syscall`（✅ 已完成）
 2. `pgtbl`（✅ 已完成）
-3. `traps`
+3. `traps`（✅ 已完成）
 4. `cow`
 5. `thread`
 6. `lock`
@@ -149,27 +149,44 @@
 
 ## traps
 
-官方内容：两部分：
+当前状态：已整合到 `dev/all`。
 
-1. 在 `kernel/printf.c` 中实现 `backtrace()`
-2. 实现 `sigalarm` / `sigreturn`，让用户态按时钟周期触发 handler
+官方内容：两部分：实现 `backtrace()` 内核栈回溯、实现 `sigalarm`/`sigreturn` 用户态定时器回调。
 
-建议迁移文件：
+实际迁移文件：
 
 - `kernel/printf.c`
 - `kernel/defs.h`
 - `kernel/riscv.h`
 - `kernel/trap.c`
 - `kernel/proc.h`
-- `kernel/proc.c`
 - `kernel/sysproc.c`
-- `kernel/syscall.h`
 - `kernel/syscall.c`
+- `kernel/syscall.h`
 - `user/user.h`
 - `user/usys.pl`
 - `user/alarmtest.c`
 - `user/bttest.c`
 - `Makefile`
+- `grade-lab-traps`
+
+本轮没有迁移的内容：
+
+- `answers-traps.txt`（课程问答，不属于功能代码）
+- `usertests`（耗时长且在有限 fs 镜像上不稳定）
+
+验证方式：
+
+- `make grade-traps`
+- `make grade-all`
+
+其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps`。
+
+注意：
+
+- `backtrace()` 从 `sys_sleep` 中调用以使 bttest 能触发栈回溯输出。
+- alarm 字段在 proc 中默认零初始化（`allocproc` 已通过 `kalloc` 清零 trapframe 页），`alarm_interval=0` 表示禁用。
+- grader 只包含 backtrace 和 alarm 测试（共 60 分），已移除 answers、usertests 和 time 测试。
 
 ## cow
 

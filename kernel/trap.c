@@ -72,8 +72,19 @@ void usertrap(void) {
         exit(-1);
 
     // give up the CPU if this is a timer interrupt.
-    if (which_dev == 2)
+    if (which_dev == 2) {
+        if (p->alarm_interval > 0) {
+            if (p->alarm_ticks_left > 0)
+                p->alarm_ticks_left--;
+            if (p->alarm_ticks_left == 0 && p->in_alarm == 0) {
+                p->in_alarm = 1;
+                p->alarm_ticks_left = p->alarm_interval;
+                p->alarm_trapframe_backup = *(p->trapframe);
+                p->trapframe->epc = p->alarm_handler;
+            }
+        }
         yield();
+    }
 
     usertrapret();
 }
@@ -175,13 +186,9 @@ int devintr() {
             uartintr();
         } else if (irq == VIRTIO0_IRQ) {
             virtio_disk_intr();
-        }
-#ifdef LAB_NET
-        else if (irq == E1000_IRQ) {
+        } else if (irq == E1000_IRQ) {
             e1000_intr();
-        }
-#endif
-        else if (irq) {
+        } else if (irq) {
             printf("unexpected interrupt irq=%d\n", irq);
         }
 
