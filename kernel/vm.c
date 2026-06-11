@@ -283,7 +283,6 @@ int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz) {
     pte_t *pte;
     uint64 pa, i;
     uint flags;
-    char *mem;
 
     for (i = 0; i < sz; i += PGSIZE) {
         if ((pte = walk(old, i, 0)) == 0)
@@ -292,13 +291,16 @@ int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz) {
             panic("uvmcopy: page not present");
         pa = PTE2PA(*pte);
         flags = PTE_FLAGS(*pte);
-        if ((mem = kalloc()) == 0)
+
+        // Mark both parent and child PTEs as read-only with COW.
+        *pte &= ~PTE_W;
+        *pte |= PTE_COW;
+        flags &= ~PTE_W;
+        flags |= PTE_COW;
+
+        if (mappages(new, i, PGSIZE, pa, flags) != 0)
             goto err;
-        memmove(mem, (char *)pa, PGSIZE);
-        if (mappages(new, i, PGSIZE, (uint64)mem, flags) != 0) {
-            kfree(mem);
-            goto err;
-        }
+        increase_ref(pa);
     }
     return 0;
 
@@ -351,12 +353,35 @@ int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len) {
 
     while (len > 0) {
         va0 = PGROUNDDOWN(dstva);
-        pa0 = walkaddr(pagetable, va0);
+        pte_t *pte = walk(pagetable, va0, 0);
+        if (pte == 0 || (*pte & PTE_V) == 0)
+            return -1;
+        pa0 = PTE2PA(*pte);
         if (pa0 == 0)
             return -1;
         n = PGSIZE - (dstva - va0);
         if (n > len)
             n = len;
+
+        if ((*pte & PTE_COW) && !(*pte & PTE_W)) {
+            uint64 pa = PTE2PA(*pte);
+            uint flags = PTE_FLAGS(*pte);
+            if (get_ref(pa) > 1) {
+                char *mem = kalloc();
+                if (mem == 0)
+                    return -1;
+                memmove(mem, (char *)pa, PGSIZE);
+                flags &= ~PTE_COW;
+                flags |= PTE_W;
+                *pte = PA2PTE((uint64)mem) | flags;
+                kfree((void *)pa);
+            } else {
+                *pte &= ~PTE_COW;
+                *pte |= PTE_W;
+            }
+            pa0 = PTE2PA(*pte);
+        }
+
         memmove((void *)(pa0 + (dstva - va0)), src, n);
 
         len -= n;

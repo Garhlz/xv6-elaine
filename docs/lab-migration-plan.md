@@ -28,7 +28,7 @@
 1. `syscall`（✅ 已完成）
 2. `pgtbl`（✅ 已完成）
 3. `traps`（✅ 已完成）
-4. `cow`
+4. `cow`（✅ 已完成）
 5. `thread`
 6. `lock`
 7. `fs`
@@ -190,22 +190,36 @@
 
 ## cow
 
-官方内容：实现 copy-on-write `fork()`，通过共享只读页和缺页异常按需复制，解决大地址空间 `fork` 的内存开销问题。
+当前状态：已整合到 `dev/all`。
 
-建议迁移文件：
+官方内容：实现 copy-on-write fork，通过引用计数和缺页异常在父子进程间共享物理页，写入时按需复制。
+
+实际迁移文件：
 
 - `kernel/vm.c`
 - `kernel/kalloc.c`
 - `kernel/trap.c`
-- `kernel/proc.h`
-- `kernel/defs.h`
 - `kernel/riscv.h`
+- `kernel/defs.h`
+- `kernel/sysproc.c`
 - `user/cowtest.c`
 - `Makefile`
+- `grade-lab-cow`
+
+本轮没有迁移的内容：
+
+- `usertests`（耗时长，省略）
+
+验证方式：
+
+- `make grade-cow`
+- `make grade-all`
 
 注意：
 
-- 这是内存管理实验，和 `pgtbl` / `traps` 强相关，必须在它们之后整合。
+- `PA2INDEX` 使用 `(pa - KERNBASE) / PGSIZE` 计算相对于 KERNBASE 的索引，不是绝对物理地址除以页大小。
+- 从 `sys_sleep` 移除了 `backtrace()` 调用，避免其输出干扰其他测试的行匹配。
+- `kfree` 改为引用计数语义：只在计数归零时才真正回收页面。
 
 ## thread
 

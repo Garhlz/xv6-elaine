@@ -44,7 +44,8 @@ Recent history uses short, imperative or descriptive commit subjects such as `fi
 When migrating a lab from its reference branch to `dev/all`:
 
 1. `git diff net..<lab> --name-only` to list the functional files for that lab.
-2. Migrate only the **lab-specific functional code** — skip formatting noise, toolchain config (`.clang-format`, `.clangd`, `compile_commands.json`), and temporary files.
+2. **Reference the original branch implementation** — use `git show <lab>:<file>` to read the exact working code from the lab branch. Copy its logic faithfully, especially subtle details like macro definitions and conditionals.
+3. Migrate only the **lab-specific functional code** — skip formatting noise, toolchain config (`.clang-format`, `.clangd`, `compile_commands.json`), and temporary files.
 3. Remove `#ifdef LAB_*` guards for the migrated lab; `dev/all` integrates all labs unconditionally.
 4. **Do not modify grader expectations** to match local file differences. Instead, add stable test data (e.g. the original `README` file) so the grader stays unchanged.
 5. Run the grader (`make grade-<lab>` or `make grade-all`) and confirm all tests pass.

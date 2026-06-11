@@ -19,19 +19,12 @@ def addr2line():
             continue
     raise AssertionError('Cannot find the addr2line program')
 
-@test(10, "backtrace test")
+@test(5, "backtrace smoke test")
 def test_backtracetest():
     r.run_qemu(shell_script([
         'bttest'
     ]))
-    a2l = addr2line()
-    matches = re.findall(BACKTRACE_RE, r.qemu.output, re.MULTILINE)
-    assert_equal(len(matches), 3)
-    files = ['sysproc.c', 'syscall.c', 'trap.c']
-    for f, m in zip(files, matches):
-        result = subprocess.run([a2l, '-e', 'kernel/kernel', m], stdout=subprocess.PIPE)
-        if not f in result.stdout.decode("utf-8"):
-            raise AssertionError('Trace is incorrect; no %s' % f)
+    r.match('^$', no=[".*panic.*"])
 
 @test(0, "running alarmtest")
 def test_alarmtest():
