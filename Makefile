@@ -174,6 +174,7 @@ mkfs/mkfs: mkfs/mkfs.c $K/fs.h $K/param.h
 UPROGS=\
 	$U/_cat\
 	$U/_echo\
+	$U/_find\
 	$U/_forktest\
 	$U/_grep\
 	$U/_init\
@@ -181,12 +182,16 @@ UPROGS=\
 	$U/_ln\
 	$U/_ls\
 	$U/_mkdir\
+	$U/_pingpong\
+	$U/_primes\
 	$U/_rm\
 	$U/_sh\
+	$U/_sleep\
 	$U/_stressfs\
 	$U/_usertests\
 	$U/_grind\
 	$U/_wc\
+	$U/_xargs\
 	$U/_zombie\
 
 
@@ -255,13 +260,11 @@ UPROGS += \
 endif
 
 UEXTRA=
-ifeq ($(LAB),util)
-	UEXTRA += user/xargstest.sh
-endif
+UEXTRA += user/xargstest.sh
 
 
-fs.img: mkfs/mkfs README $(UEXTRA) $(UPROGS)
-	mkfs/mkfs fs.img README $(UEXTRA) $(UPROGS)
+fs.img: mkfs/mkfs README.md $(UEXTRA) $(UPROGS)
+	mkfs/mkfs fs.img README.md $(UEXTRA) $(UPROGS)
 
 -include kernel/*.d user/*.d
 
@@ -335,6 +338,28 @@ grade:
 	@$(MAKE) clean || \
           (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
 	./grade-lab-$(LAB) $(GRADEFLAGS)
+
+grade-util:
+	@echo $(MAKE) clean
+	@$(MAKE) clean || \
+          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
+	./grade-lab-util $(GRADEFLAGS)
+
+grade-net:
+	@echo $(MAKE) clean
+	@$(MAKE) clean || \
+          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
+	./grade-lab-net $(GRADEFLAGS)
+
+grade-all:
+	@echo $(MAKE) clean
+	@$(MAKE) clean || \
+          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
+	@echo $(MAKE) .gdbinit fs.img
+	@$(MAKE) .gdbinit fs.img || \
+          (echo "'make .gdbinit fs.img' failed." && exit 1)
+	./grade-lab-util --no-make $(GRADEFLAGS)
+	./grade-lab-net --no-make $(GRADEFLAGS)
 
 ##
 ## FOR web handin

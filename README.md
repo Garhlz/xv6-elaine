@@ -1,6 +1,6 @@
 # xv6-labs-2021
 
-这是一个基于 MIT 6.S081 / 6.828 2021 课程的 xv6-riscv 实验仓库，当前实验配置位于 `conf/lab.mk`，现在是 `LAB=net`。
+这是一个基于 MIT 6.S081 / 6.828 2021 课程的 xv6-riscv 实验仓库。当前活动实验配置位于 `conf/lab.mk`，现在是 `LAB=net`；`dev/all` 分支上已经额外整合了 `util` 实验的用户态程序与测试入口。
 
 ## 目录说明
 
@@ -9,6 +9,7 @@
 - `mkfs/`：构建 `fs.img` 的宿主机工具。
 - `conf/`：实验配置。
 - 根目录脚本：
+  - `grade-lab-util`
   - `grade-lab-net`
   - `gradelib.py`
   - `server.py`
@@ -48,6 +49,16 @@ make qemu-gdb
 make grade
 ```
 
+### 运行 util / net / 汇总评分
+
+```bash
+make grade-util
+make grade-net
+make grade-all
+```
+
+`make grade-all` 会先统一清理并构建一次系统产物，然后依次运行 `util` 和 `net` 的 grader；测试过程中仍会按用例重复启动 QEMU，但不会重复执行整仓库构建。
+
 ### net lab 手工测试
 
 先在一个终端启动宿主机 UDP 回显服务：
@@ -76,6 +87,7 @@ make ping
 
 ## 说明
 
-- `make grade` 目前会调用 `grade-lab-net`。
+- `make grade` 会调用当前 `LAB` 对应的 grader；现在默认是 `grade-lab-net`。
+- `make grade-util`、`make grade-net`、`make grade-all` 适合 `dev/all` 分支上的阶段性回归验证。
 - 生成文件如 `fs.img`、`kernel/kernel`、`*.o`、`*.asm`、`*.sym`、`packets.pcap` 不应当作为源码提交。
 - 当前仓库已经补充了 `clangd` / `clang-format` / `compile_commands.json` 相关配置，适合继续做代码阅读和实验回顾。

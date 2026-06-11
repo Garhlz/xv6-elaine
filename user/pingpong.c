@@ -2,51 +2,60 @@
 #include "kernel/stat.h"
 #include "user/user.h"
 
-#define N 5
-char buf[N];
+int main(int argc, char *argv[]) {
+    char buf[8];
+    int parent_to_child[2];
+    int child_to_parent[2];
+    int pid;
 
-void
-pong(int *parent_to_child, int *child_to_parent) {
-  if (read(parent_to_child[0], buf, N) < 0) {
-    printf("read failed\n");
-  }
-  printf("%d: received %s\n", getpid(), buf);
-  if (write(child_to_parent[1], "pong", 4) != 4) {
-    printf("write failed\n");
-  }
-}
+    if (argc != 1) {
+        fprintf(2, "usage: pingpong\n");
+        exit(1);
+    }
 
-void
-ping(int *parent_to_child, int *child_to_parent) {
-  
-  if (write(parent_to_child[1], "ping", 4) != 4) {
-    printf("write failed\n");
-  }
-  if (read(child_to_parent[0], buf, N) < 0) {
-    printf("read failed\n");
-  }
-  printf("%d: received %s\n", getpid(), buf);
-}
+    if (pipe(parent_to_child) < 0 || pipe(child_to_parent) < 0) {
+        fprintf(2, "pingpong: pipe failed\n");
+        exit(1);
+    }
 
-int
-main(int argc, char *argv[])
-{
-  int parent_to_child[2];
-  int child_to_parent[2];
+    pid = fork();
+    if (pid < 0) {
+        fprintf(2, "pingpong: fork failed\n");
+        exit(1);
+    }
 
-  int pid;
+    if (pid == 0) {
+        close(parent_to_child[1]);
+        close(child_to_parent[0]);
+        if (read(parent_to_child[0], buf, 4) != 4) {
+            fprintf(2, "pingpong: child read failed\n");
+            exit(1);
+        }
+        buf[4] = '\0';
+        printf("%d: received %s\n", getpid(), buf);
+        if (write(child_to_parent[1], "pong", 4) != 4) {
+            fprintf(2, "pingpong: child write failed\n");
+            exit(1);
+        }
+        close(parent_to_child[0]);
+        close(child_to_parent[1]);
+        exit(0);
+    }
 
-  if (pipe(parent_to_child) < 0 || pipe(child_to_parent) < 0) {
-    printf("pipe failed\n");
-  }
-  if ((pid = fork()) < 0) {
-    printf("fork failed\n");
-  }
-  if (pid == 0) {
-    pong(parent_to_child, child_to_parent);
-  } else {
-    ping(parent_to_child, child_to_parent);
-  }
-  
-  exit(0);
+    close(parent_to_child[0]);
+    close(child_to_parent[1]);
+    if (write(parent_to_child[1], "ping", 4) != 4) {
+        fprintf(2, "pingpong: parent write failed\n");
+        exit(1);
+    }
+    if (read(child_to_parent[0], buf, 4) != 4) {
+        fprintf(2, "pingpong: parent read failed\n");
+        exit(1);
+    }
+    buf[4] = '\0';
+    printf("%d: received %s\n", getpid(), buf);
+    close(parent_to_child[1]);
+    close(child_to_parent[0]);
+    wait(0);
+    exit(0);
 }
