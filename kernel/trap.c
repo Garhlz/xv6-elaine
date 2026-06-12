@@ -59,6 +59,9 @@ void usertrap(void) {
         intr_on();
 
         syscall();
+    } else if (r_scause() == 13) {
+        if (mmap_fault(r_stval(), 0) < 0)
+            p->killed = 1;
     } else if (r_scause() == 15) {
         // COW page fault
         uint64 va = PGROUNDDOWN(r_stval());
@@ -68,7 +71,8 @@ void usertrap(void) {
         } else {
             pte_t *pte = walk(pagetable, va, 0);
             if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0) {
-                p->killed = 1;
+                if (mmap_fault(r_stval(), 1) < 0)
+                    p->killed = 1;
             } else if (*pte & PTE_COW) {
                 uint64 pa = PTE2PA(*pte);
                 if (get_ref(pa) == 1) {
@@ -89,7 +93,8 @@ void usertrap(void) {
                 }
                 sfence_vma();
             } else {
-                p->killed = 1;
+                if (mmap_fault(r_stval(), 1) < 0)
+                    p->killed = 1;
             }
         }
     } else if ((which_dev = devintr()) != 0) {

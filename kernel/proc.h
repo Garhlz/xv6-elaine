@@ -90,6 +90,19 @@ struct trapframe {
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+#define NVMA 16
+#define MMAPBASE 0x40000000
+
+struct vma {
+    uint64 addr;
+    uint64 length;
+    uint64 offset;
+    int prot;
+    int flags;
+    struct file *file;
+    int valid;
+};
+
 // Per-process state
 struct proc {
     struct spinlock lock;
@@ -120,8 +133,14 @@ struct proc {
     int alarm_ticks_left;                    // ticks remaining until next alarm
     struct trapframe alarm_trapframe_backup; // saved registers for alarm
     int in_alarm;                            // prevent re-entrant alarm calls
+    struct vma vmas[NVMA];                   // file-backed lazy mappings
+    uint64 mmap_top;                         // next mmap allocation address
 };
 
 uint64 count_nproc(void);
+struct vma *find_vma(struct proc *, uint64);
+int mmap_fault(uint64, int);
+int mmap_unmap(struct proc *, uint64, uint64);
+void mmap_cleanup(struct proc *);
 
 #endif

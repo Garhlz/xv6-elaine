@@ -22,7 +22,7 @@
 - 优先迁移“实验必需代码”，跳过 `.vscode/`、格式化、临时文件、测试产物。
 - 每整合一个实验，就单独提交并跑对应测试。
 - `net` 已经在 `dev/all` 中，后续实验应以它为基线继续叠加。
-- 当前 `make grade-all` 已串联 `util → syscall → net → pgtbl → traps → cow → thread → lock`，并复用一次统一构建产物。
+- 当前 `make grade-all` 已串联 `util → syscall → net → pgtbl → traps → cow → thread → lock → fs → mmap`，并复用一次统一构建产物。
 
 ## 建议整合顺序
 
@@ -33,7 +33,7 @@
 5. `thread`（✅ 已完成）
 6. `lock`（✅ 已完成）
 7. `fs`（✅ 已完成）
-8. `mmap`
+8. `mmap`（✅ 已完成）
 
 `net` 已完成，`util` 已完成，不需要再次迁移。
 
@@ -70,7 +70,7 @@
 - `make grade-syscall`
 - `make grade-all`
 
-其中 `make grade-all` 会先统一构建一遍，再依次执行 `util → syscall → net → pgtbl → traps → cow → thread → lock` 的 grader。
+其中 `make grade-all` 会先统一构建一遍，再依次执行 `util → syscall → net → pgtbl → traps → cow → thread → lock → fs → mmap` 的 grader。
 
 注意：
 
@@ -102,7 +102,7 @@
 - `make grade-util`
 - `make grade-all`
 
-其中 `make grade-all` 会先统一构建一遍，再依次执行 `util → syscall → net → pgtbl → traps → cow → thread → lock` 的 grader。
+其中 `make grade-all` 会先统一构建一遍，再依次执行 `util → syscall → net → pgtbl → traps → cow → thread → lock → fs → mmap` 的 grader。
 
 ## pgtbl
 
@@ -140,7 +140,7 @@
 - `make grade-pgtbl`
 - `make grade-all`
 
-其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow → thread → lock → fs`（用户态 → 系统调用 → 驱动 → 内存管理 → 异常处理 → COW 内存管理 → 线程与并发练习 → 锁竞争优化 → 文件系统）。
+其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow → thread → lock → fs → mmap`（用户态 → 系统调用 → 驱动 → 内存管理 → 异常处理 → COW 内存管理 → 线程与并发练习 → 锁竞争优化 → 文件系统 → 文件映射）。
 
 注意：
 
@@ -181,7 +181,7 @@
 - `make grade-traps`
 - `make grade-all`
 
-其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow → thread → lock → fs`。
+其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow → thread → lock → fs → mmap`。
 
 注意：
 
@@ -365,9 +365,11 @@
 
 ## mmap
 
+当前状态：已整合到 `dev/all`。
+
 官方内容：实现文件映射相关的 `mmap()` / `munmap()`，支持按页懒分配、缺页装载、部分取消映射、进程退出时回收映射。
 
-建议迁移文件：
+实际迁移文件：
 
 - `kernel/proc.h`
 - `kernel/proc.c`
@@ -383,10 +385,22 @@
 - `user/usys.pl`
 - `user/mmaptest.c`
 - `Makefile`
+- `grade-lab-mmap`
+
+验证方式：
+
+- `make grade-mmap`
+- `make grade-cow`
+- `make grade-traps`
+- `make grade-all`
 
 注意：
 
-- `mmap` 会再次修改进程元数据、缺页异常和文件回写路径，应当在 `fs` 之后整合。
+- `mmap` 在 `dev/all` 中复用现有 syscall 编号 `SYS_mmap=27`、`SYS_munmap=28`，不会覆盖后续 net/pgtbl 编号。
+- `usertrap()` 中 COW store fault 优先，mmap 只处理 load fault 或非 COW store fault，避免回归 cow lab。
+- VMA 采用固定 mmap 区间和 lazy fault-in；`munmap()` 支持 whole / prefix / suffix，不实现中间 punch hole。
+- `MAP_SHARED` 写回只处理已经 fault-in 的页，未映射页允许跳过。
+- `grade-lab-mmap` 已移除 `time` 和完整 `usertests` 检查；完整 `usertests` 在当前 fs 集成后会被 `MAXFILE` 放大，适合通过 `grade-fs` / `grade-all` 的重型回归覆盖。
 
 ## 本地分支与迁移策略
 
@@ -410,9 +424,9 @@
 3. 若某个实验分支只有 1 到 2 个清晰提交，再考虑 `cherry-pick`。
 4. 工具链、格式化、README、临时文件不要和实验功能混提。
 
-## 下一步建议
+## 后续建议
 
-从 `syscall` 开始逐个整合，每个实验保持一份独立提交，提交信息建议统一成：
+所有计划内实验已整合。后续如继续重构测试系统或整理实现，每次仍保持一份独立提交，提交信息建议统一成：
 
 ```text
 feat(<lab>): integrate <lab> lab changes

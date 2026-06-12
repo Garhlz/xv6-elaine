@@ -3,6 +3,8 @@
 #include "memlayout.h"
 #include "riscv.h"
 #include "spinlock.h"
+#include "file.h"
+#include "fcntl.h"
 #include "proc.h"
 #include "defs.h"
 
@@ -19,6 +21,8 @@ extern void forkret(void);
 static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
+static void mmap_close(struct proc *p);
+static int mmap_writeback(struct proc *p, struct vma *vma, uint64 start, uint64 end);
 
 // helps ensure that wakeups of wait()ing
 // parents are not lost. helps obey the
@@ -115,6 +119,8 @@ found:
     p->alarm_ticks_left = 0;
     memset(&p->alarm_trapframe_backup, 0, sizeof(p->alarm_trapframe_backup));
     p->in_alarm = 0;
+    p->mmap_top = MMAPBASE;
+    memset(p->vmas, 0, sizeof(p->vmas));
 
     // Allocate a trapframe page.
     if ((p->trapframe = (struct trapframe *)kalloc()) == 0) {
@@ -152,6 +158,7 @@ found:
 // including user pages.
 // p->lock must be held.
 static void freeproc(struct proc *p) {
+    mmap_close(p);
     if (p->trapframe)
         kfree((void *)p->trapframe);
     p->trapframe = 0;
@@ -174,6 +181,8 @@ static void freeproc(struct proc *p) {
     p->alarm_ticks_left = 0;
     memset(&p->alarm_trapframe_backup, 0, sizeof(p->alarm_trapframe_backup));
     p->in_alarm = 0;
+    p->mmap_top = MMAPBASE;
+    memset(p->vmas, 0, sizeof(p->vmas));
     p->state = UNUSED;
 }
 
@@ -301,6 +310,14 @@ int fork(void) {
     // copy saved trace mask.
     np->tracemask = p->tracemask;
 
+    np->mmap_top = p->mmap_top;
+    for (i = 0; i < NVMA; i++) {
+        if (p->vmas[i].valid) {
+            np->vmas[i] = p->vmas[i];
+            np->vmas[i].file = filedup(p->vmas[i].file);
+        }
+    }
+
     // increment reference counts on open file descriptors.
     for (i = 0; i < NOFILE; i++)
         if (p->ofile[i])
@@ -345,6 +362,8 @@ void exit(int status) {
 
     if (p == initproc)
         panic("init exiting");
+
+    mmap_cleanup(p);
 
     // Close all open files.
     for (int fd = 0; fd < NOFILE; fd++) {
@@ -643,4 +662,143 @@ uint64 count_nproc(void) {
         release(&p->lock);
     }
     return cnt;
+}
+
+struct vma *find_vma(struct proc *p, uint64 va) {
+    for (int i = 0; i < NVMA; i++) {
+        struct vma *vma = &p->vmas[i];
+        if (vma->valid && va >= vma->addr && va < vma->addr + vma->length)
+            return vma;
+    }
+    return 0;
+}
+
+int mmap_fault(uint64 va, int write) {
+    struct proc *p = myproc();
+    uint64 page = PGROUNDDOWN(va);
+    struct vma *vma = find_vma(p, va);
+    char *mem;
+    int perm = PTE_U;
+    int n;
+
+    if (vma == 0)
+        return -1;
+    if (write && (vma->prot & PROT_WRITE) == 0)
+        return -1;
+    if (!write && (vma->prot & PROT_READ) == 0)
+        return -1;
+    if (walkaddr(p->pagetable, page) != 0)
+        return -1;
+
+    if ((mem = kalloc()) == 0)
+        return -1;
+    memset(mem, 0, PGSIZE);
+
+    ilock(vma->file->ip);
+    n = readi(vma->file->ip, 0, (uint64)mem, vma->offset + page - vma->addr, PGSIZE);
+    iunlock(vma->file->ip);
+    if (n < 0) {
+        kfree(mem);
+        return -1;
+    }
+
+    if (vma->prot & PROT_READ)
+        perm |= PTE_R;
+    if (vma->prot & PROT_WRITE)
+        perm |= PTE_R | PTE_W;
+    if (vma->prot & PROT_EXEC)
+        perm |= PTE_X;
+
+    if (mappages(p->pagetable, page, PGSIZE, (uint64)mem, perm) < 0) {
+        kfree(mem);
+        return -1;
+    }
+    return 0;
+}
+
+int mmap_unmap(struct proc *p, uint64 addr, uint64 length) {
+    uint64 start, end;
+    struct vma *vma;
+    uint64 vstart, vend;
+
+    if (length == 0 || addr % PGSIZE)
+        return -1;
+    if (addr + length < addr)
+        return -1;
+
+    start = PGROUNDDOWN(addr);
+    end = PGROUNDUP(addr + length);
+    vma = find_vma(p, start);
+    if (vma == 0 || end > vma->addr + vma->length)
+        return -1;
+
+    vstart = vma->addr;
+    vend = vma->addr + vma->length;
+    if (start > vstart && end < vend)
+        return -1;
+
+    if ((vma->flags & MAP_SHARED) && mmap_writeback(p, vma, start, end) < 0)
+        return -1;
+
+    uvmunmap_mmap(p->pagetable, start, (end - start) / PGSIZE, 1);
+
+    if (start == vstart && end == vend) {
+        fileclose(vma->file);
+        memset(vma, 0, sizeof(*vma));
+    } else if (start == vstart) {
+        vma->offset += end - vstart;
+        vma->addr = end;
+        vma->length = vend - end;
+    } else {
+        vma->length = start - vstart;
+    }
+
+    return 0;
+}
+
+void mmap_cleanup(struct proc *p) {
+    for (int i = 0; i < NVMA; i++) {
+        struct vma *vma = &p->vmas[i];
+        if (vma->valid)
+            mmap_unmap(p, vma->addr, vma->length);
+    }
+}
+
+static void mmap_close(struct proc *p) {
+    for (int i = 0; i < NVMA; i++) {
+        if (p->vmas[i].valid) {
+            fileclose(p->vmas[i].file);
+            memset(&p->vmas[i], 0, sizeof(p->vmas[i]));
+        }
+    }
+}
+
+static int mmap_writeback(struct proc *p, struct vma *vma, uint64 start, uint64 end) {
+    int max = ((MAXOPBLOCKS - 1 - 1 - 2) / 2) * BSIZE;
+
+    for (uint64 va = start; va < end; va += PGSIZE) {
+        pte_t *pte = walk(p->pagetable, va, 0);
+        int total = 0;
+
+        if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
+            continue;
+
+        while (total < PGSIZE) {
+            int n = PGSIZE - total;
+            int r;
+            if (n > max)
+                n = max;
+
+            begin_op();
+            ilock(vma->file->ip);
+            r = writei(vma->file->ip, 1, va + total, vma->offset + va - vma->addr + total, n);
+            iunlock(vma->file->ip);
+            end_op();
+
+            if (r != n)
+                return -1;
+            total += n;
+        }
+    }
+    return 0;
 }

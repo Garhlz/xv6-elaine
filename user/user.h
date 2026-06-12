@@ -27,6 +27,8 @@ char *sbrk(int);
 int sleep(int);
 int uptime(void);
 int symlink(const char *, const char *);
+void *mmap(void *, uint64, int, int, int, uint64);
+int munmap(void *, uint64);
 int connect(uint32, uint16, uint16);
 int pgaccess(void *base, int len, void *mask);
 int ugetpid(void);

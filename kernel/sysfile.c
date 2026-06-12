@@ -5,6 +5,7 @@
 //
 
 #include "types.h"
+#include "memlayout.h"
 #include "riscv.h"
 #include "defs.h"
 #include "param.h"
@@ -384,6 +385,65 @@ uint64 sys_symlink(void) {
     iunlockput(ip);
     end_op();
     return 0;
+}
+
+uint64 sys_mmap(void) {
+    uint64 addr, length, offset;
+    int prot, flags, fd;
+    struct file *f;
+    struct proc *p = myproc();
+    struct vma *vma = 0;
+    uint64 rounded;
+
+    if (argaddr(0, &addr) < 0 || argaddr(1, &length) < 0 || argint(2, &prot) < 0 ||
+        argint(3, &flags) < 0 || argint(4, &fd) < 0 || argaddr(5, &offset) < 0) {
+        return -1;
+    }
+
+    if (length == 0 || fd < 0 || fd >= NOFILE || (f = p->ofile[fd]) == 0)
+        return -1;
+    if (f->type != FD_INODE)
+        return -1;
+    if ((flags & (MAP_SHARED | MAP_PRIVATE)) == 0)
+        return -1;
+    if ((flags & MAP_SHARED) && (flags & MAP_PRIVATE))
+        return -1;
+    if ((prot & PROT_READ) && !f->readable)
+        return -1;
+    if ((flags & MAP_SHARED) && (prot & PROT_WRITE) && !f->writable)
+        return -1;
+
+    rounded = PGROUNDUP(length);
+    if (p->mmap_top + rounded < p->mmap_top || p->mmap_top + rounded >= TRAPFRAME)
+        return -1;
+
+    for (int i = 0; i < NVMA; i++) {
+        if (!p->vmas[i].valid) {
+            vma = &p->vmas[i];
+            break;
+        }
+    }
+    if (vma == 0)
+        return -1;
+
+    vma->addr = p->mmap_top;
+    vma->length = rounded;
+    vma->offset = offset;
+    vma->prot = prot;
+    vma->flags = flags;
+    vma->file = filedup(f);
+    vma->valid = 1;
+    p->mmap_top += rounded;
+
+    return vma->addr;
+}
+
+uint64 sys_munmap(void) {
+    uint64 addr, length;
+
+    if (argaddr(0, &addr) < 0 || argaddr(1, &length) < 0)
+        return -1;
+    return mmap_unmap(myproc(), addr, length);
 }
 
 uint64 sys_mkdir(void) {

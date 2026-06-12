@@ -190,6 +190,7 @@ UPROGS=\
 	$U/_bcachetest\
 	$U/_bigfile\
 	$U/_symlinktest\
+	$U/_mmaptest\
 
 ifeq ($(LAB),lazy)
 UPROGS += \
@@ -350,6 +351,12 @@ grade-fs:
           (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
 	./grade-lab-fs $(GRADEFLAGS)
 
+grade-mmap:
+	@echo $(MAKE) clean
+	@$(MAKE) clean || \
+          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
+	./grade-lab-mmap $(GRADEFLAGS)
+
 grade-all:
 	@echo $(MAKE) clean; \
 	$(MAKE) clean || \
@@ -365,6 +372,7 @@ grade-all:
 	./grade-lab-cow --no-make $(GRADEFLAGS); \
 	./grade-lab-thread --no-make $(GRADEFLAGS); \
 	./grade-lab-lock --no-make $(GRADEFLAGS); \
-	./grade-lab-fs --no-make $(GRADEFLAGS)
+	./grade-lab-fs --no-make $(GRADEFLAGS); \
+	./grade-lab-mmap --no-make $(GRADEFLAGS)
 
 .PHONY: clean grade
