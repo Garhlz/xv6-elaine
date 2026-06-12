@@ -17,7 +17,7 @@ Builds expect a RISC-V GCC/binutils toolchain and `qemu-system-riscv64` in `PATH
 
 ## Coding Style & Naming Conventions
 
-Follow `.editorconfig`: LF endings, final newline, spaces by default, 2-space indentation for C and headers, 8-space indentation for assembly, and tabs in `Makefile`. Match xv6 C style: small functions, simple control flow, lowercase identifiers, and minimal abstraction. Kernel entry points and helpers belong in matching subsystem files, for example `kernel/sysnet.c` for network syscalls and `kernel/e1000.c` for E1000 driver work. User programs should be named `user/name.c` and added to `UPROGS` as `$U/_name`.
+Follow `.editorconfig`: LF endings, final newline, spaces by default, 4-space indentation for C and headers, 8-space indentation for assembly, and tabs in `Makefile`. Match xv6 C style: small functions, simple control flow, lowercase identifiers, and minimal abstraction. Kernel entry points and helpers belong in matching subsystem files, for example `kernel/sysnet.c` for network syscalls and `kernel/e1000.c` for E1000 driver work. User programs should be named `user/name.c` and added to `UPROGS` as `$U/_name`.
 
 ## Testing Guidelines
 

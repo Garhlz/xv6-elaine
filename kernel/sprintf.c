@@ -63,7 +63,7 @@ int snprintf(char *buf, int sz, char *fmt, ...) {
             off += sprintint(buf + off, va_arg(ap, int), 10, 1);
             break;
         case 'x':
-            off += sprintint(buf + off, va_arg(ap, int), 16, 1);
+            off += sprintint(buf + off, va_arg(ap, int), 16, 0);
             break;
         case 's':
             if ((s = va_arg(ap, char *)) == 0)
@@ -80,5 +80,7 @@ int snprintf(char *buf, int sz, char *fmt, ...) {
             break;
         }
     }
+    if (off < sz)
+        buf[off] = '\0';
     return off;
 }

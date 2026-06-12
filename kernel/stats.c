@@ -35,6 +35,8 @@ int statsread(int user_dst, uint64 dst, int n) {
             m = n;
         if (either_copyout(user_dst, dst, stats.buf + stats.off, m) != -1)
             stats.off += m;
+        else
+            m = -1;
     } else {
         m = -1;
         stats.sz = 0;

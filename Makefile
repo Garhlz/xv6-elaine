@@ -364,15 +364,15 @@ grade-all:
 	echo $(MAKE) .gdbinit fs.img; \
 	$(MAKE) .gdbinit fs.img || \
           (echo "'make .gdbinit fs.img' failed." && exit 1); \
-	./grade-lab-util --no-make $(GRADEFLAGS); \
-	./grade-lab-syscall --no-make $(GRADEFLAGS); \
-	./grade-lab-net --no-make $(GRADEFLAGS); \
-	./grade-lab-pgtbl --no-make $(GRADEFLAGS); \
-	./grade-lab-traps --no-make $(GRADEFLAGS); \
-	./grade-lab-cow --no-make $(GRADEFLAGS); \
-	./grade-lab-thread --no-make $(GRADEFLAGS); \
-	./grade-lab-lock --no-make $(GRADEFLAGS); \
-	./grade-lab-fs --no-make $(GRADEFLAGS); \
+	./grade-lab-util --no-make $(GRADEFLAGS) && \
+	./grade-lab-syscall --no-make $(GRADEFLAGS) && \
+	./grade-lab-net --no-make $(GRADEFLAGS) && \
+	./grade-lab-pgtbl --no-make $(GRADEFLAGS) && \
+	./grade-lab-traps --no-make $(GRADEFLAGS) && \
+	./grade-lab-cow --no-make $(GRADEFLAGS) && \
+	./grade-lab-thread --no-make $(GRADEFLAGS) && \
+	./grade-lab-lock --no-make $(GRADEFLAGS) && \
+	./grade-lab-fs --no-make $(GRADEFLAGS) && \
 	./grade-lab-mmap --no-make $(GRADEFLAGS)
 
 .PHONY: clean grade

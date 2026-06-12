@@ -73,7 +73,6 @@ void kfree(void *);
 void kinit(void);
 uint64 count_freemem(void);
 void increase_ref(uint64 pa);
-void decrease_ref(uint64 pa);
 int get_ref(uint64 pa);
 
 // log.c

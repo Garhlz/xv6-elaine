@@ -59,10 +59,12 @@ void freerange(void *pa_start, void *pa_end) {
     char *p;
 
     p = (char *)PGROUNDUP((uint64)pa_start);
+    acquire(&page_refs.lock);
     for (; p + PGSIZE <= (char *)pa_end; p += PGSIZE) {
         page_refs.ref_count[PA2INDEX(p)] = 0;
         kfree_cpu(p, 0);
     }
+    release(&page_refs.lock);
 }
 
 void kfree(void *pa) {
@@ -72,8 +74,10 @@ void kfree(void *pa) {
         panic("kfree");
 
     acquire(&page_refs.lock);
-    page_refs.ref_count[PA2INDEX(pa)]--;
-    if (page_refs.ref_count[PA2INDEX(pa)] == 0)
+    int idx = PA2INDEX(pa);
+    if (page_refs.ref_count[idx] < 1)
+        panic("kfree: ref underflow");
+    if (--page_refs.ref_count[idx] == 0)
         free_it = 1;
     release(&page_refs.lock);
 
@@ -128,12 +132,6 @@ void *kalloc(void) {
 void increase_ref(uint64 pa) {
     acquire(&page_refs.lock);
     page_refs.ref_count[PA2INDEX(pa)]++;
-    release(&page_refs.lock);
-}
-
-void decrease_ref(uint64 pa) {
-    acquire(&page_refs.lock);
-    page_refs.ref_count[PA2INDEX(pa)]--;
     release(&page_refs.lock);
 }
 

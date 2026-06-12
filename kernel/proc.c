@@ -158,7 +158,6 @@ found:
 // including user pages.
 // p->lock must be held.
 static void freeproc(struct proc *p) {
-    mmap_close(p);
     if (p->trapframe)
         kfree((void *)p->trapframe);
     p->trapframe = 0;
@@ -271,6 +270,8 @@ int growproc(int n) {
 
     sz = p->sz;
     if (n > 0) {
+        if (sz + n >= MMAPBASE)
+            return -1;
         if ((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
             return -1;
         }
@@ -363,7 +364,8 @@ void exit(int status) {
     if (p == initproc)
         panic("init exiting");
 
-    mmap_cleanup(p);
+    mmap_cleanup(p, 1);
+    mmap_close(p);
 
     // Close all open files.
     for (int fd = 0; fd < NOFILE; fd++) {
@@ -737,7 +739,8 @@ int mmap_unmap(struct proc *p, uint64 addr, uint64 length) {
     if (start > vstart && end < vend)
         return -1;
 
-    if ((vma->flags & MAP_SHARED) && mmap_writeback(p, vma, start, end) < 0)
+    if ((vma->flags & MAP_SHARED) && (vma->prot & PROT_WRITE) &&
+        mmap_writeback(p, vma, start, end) < 0)
         return -1;
 
     uvmunmap_mmap(p->pagetable, start, (end - start) / PGSIZE, 1);
@@ -756,12 +759,26 @@ int mmap_unmap(struct proc *p, uint64 addr, uint64 length) {
     return 0;
 }
 
-void mmap_cleanup(struct proc *p) {
+int mmap_cleanup(struct proc *p, int force) {
+    int ret = 0;
     for (int i = 0; i < NVMA; i++) {
         struct vma *vma = &p->vmas[i];
-        if (vma->valid)
-            mmap_unmap(p, vma->addr, vma->length);
+        if (!vma->valid)
+            continue;
+        if (force) {
+            // Best-effort writeback, then unmap regardless.
+            if ((vma->flags & MAP_SHARED) && (vma->prot & PROT_WRITE))
+                mmap_writeback(p, vma, vma->addr, vma->length);
+            uvmunmap_mmap(p->pagetable, vma->addr,
+                          (vma->length + PGSIZE - 1) / PGSIZE, 1);
+            fileclose(vma->file);
+            memset(vma, 0, sizeof(*vma));
+        } else {
+            if (mmap_unmap(p, vma->addr, vma->length) < 0)
+                ret = -1;
+        }
     }
+    return ret;
 }
 
 static void mmap_close(struct proc *p) {

@@ -102,7 +102,7 @@ retry:
     for (int i = 0; i < NBUCKET; i++) {
         acquire(&bcache.locks[i]);
         for (b = bcache.buckets[i].next; b != &bcache.buckets[i]; b = b->next) {
-            if (b->refcnt == 0 && (victim == 0 || b->timestamp < oldest_ts)) {
+            if (b->refcnt == 0 && (victim == 0 || (int)(b->timestamp - oldest_ts) < 0)) {
                 victim = b;
                 old_bucket_idx = i;
                 oldest_ts = b->timestamp;

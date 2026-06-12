@@ -141,6 +141,6 @@ uint64 count_nproc(void);
 struct vma *find_vma(struct proc *, uint64);
 int mmap_fault(uint64, int);
 int mmap_unmap(struct proc *, uint64, uint64);
-void mmap_cleanup(struct proc *);
+int mmap_cleanup(struct proc *, int force);
 
 #endif

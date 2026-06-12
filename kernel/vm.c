@@ -391,7 +391,9 @@ int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len) {
         if (n > len)
             n = len;
 
-        if ((*pte & PTE_COW) && !(*pte & PTE_W)) {
+        if (!(*pte & PTE_W)) {
+            if ((*pte & PTE_COW) == 0)
+                return -1;
             uint64 pa = PTE2PA(*pte);
             uint flags = PTE_FLAGS(*pte);
             if (get_ref(pa) > 1) {

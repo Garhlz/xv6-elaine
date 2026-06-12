@@ -106,6 +106,10 @@ int exec(char *path, char **argv) {
             last = s + 1;
     safestrcpy(p->name, last, sizeof(p->name));
 
+    // Tear down old mmap regions before committing the new page table.
+    if (mmap_cleanup(p, 0) < 0)
+        goto bad;
+
     // Commit to the user image.
     oldpagetable = p->pagetable;
     p->pagetable = pagetable;
