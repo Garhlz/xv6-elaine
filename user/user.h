@@ -1,3 +1,5 @@
+#include "kernel/types.h"
+
 struct stat;
 struct rtcdate;
 struct sysinfo;
@@ -24,6 +26,7 @@ int getpid(void);
 char *sbrk(int);
 int sleep(int);
 int uptime(void);
+int symlink(const char *, const char *);
 int connect(uint32, uint16, uint16);
 int pgaccess(void *base, int len, void *mask);
 int ugetpid(void);

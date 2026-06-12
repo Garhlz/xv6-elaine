@@ -25,6 +25,7 @@
 // there should be one superblock per disk device, but we run with
 // only one device
 struct superblock sb;
+static uint balloc_start;
 
 // Read the super block.
 static void readsb(int dev, struct superblock *sb) {
@@ -58,20 +59,46 @@ static void bzero(int dev, int bno) {
 // Allocate a zeroed disk block.
 // 查阅位图，找到空闲块，标记为已使用，并返回编号
 static uint balloc(uint dev) {
-    int b, bi, m;
+    uint base, b, start;
+    int bi, m;
     struct buf *bp;
 
     bp = 0;
-    for (b = 0; b < sb.size; b += BPB) {
-        bp = bread(dev, BBLOCK(b, sb));
-        for (bi = 0; bi < BPB && b + bi < sb.size; bi++) {
+    start = balloc_start % sb.size;
+
+    for (b = start; b < sb.size; b = base + BPB) {
+        base = b - b % BPB;
+        bp = bread(dev, BBLOCK(base, sb));
+        for (bi = b - base; bi < BPB && base + bi < sb.size; bi++) {
             m = 1 << (bi % 8);
             if ((bp->data[bi / 8] & m) == 0) { // Is block free?
                 bp->data[bi / 8] |= m;         // Mark block in use.
                 log_write(bp);
                 brelse(bp);
-                bzero(dev, b + bi);
-                return b + bi;
+                balloc_start = base + bi + 1;
+                if (balloc_start >= sb.size)
+                    balloc_start = 0;
+                bzero(dev, base + bi);
+                return base + bi;
+            }
+        }
+        brelse(bp);
+    }
+
+    for (b = 0; b < start; b = base + BPB) {
+        base = b - b % BPB;
+        bp = bread(dev, BBLOCK(base, sb));
+        for (bi = b - base; bi < BPB && base + bi < start; bi++) {
+            m = 1 << (bi % 8);
+            if ((bp->data[bi / 8] & m) == 0) { // Is block free?
+                bp->data[bi / 8] |= m;         // Mark block in use.
+                log_write(bp);
+                brelse(bp);
+                balloc_start = base + bi + 1;
+                if (balloc_start >= sb.size)
+                    balloc_start = 0;
+                bzero(dev, base + bi);
+                return base + bi;
             }
         }
         brelse(bp);
@@ -349,7 +376,9 @@ void iunlockput(struct inode *ip) {
 // The content (data) associated with each inode is stored
 // in blocks on the disk. The first NDIRECT block numbers
 // are listed in ip->addrs[].  The next NINDIRECT blocks are
-// listed in block ip->addrs[NDIRECT].
+// listed in block ip->addrs[NDIRECT]. The next NDOUBLY_INDIRECT
+// blocks are listed in the indirect blocks pointed to by
+// ip->addrs[NDIRECT + 1].
 
 // Return the disk block address of the nth block in inode ip.
 // If there is no such block, bmap allocates one.
@@ -375,6 +404,32 @@ static uint bmap(struct inode *ip, uint bn) {
         if ((addr = a[bn]) == 0) // 从间接块中取出，执行一样的逻辑
         {
             a[bn] = addr = balloc(ip->dev);
+            log_write(bp);
+        }
+        brelse(bp);
+        return addr;
+    }
+    bn -= NINDIRECT;
+
+    if (bn < NDOUBLY_INDIRECT) {
+        uint first_bn = bn / NINDIRECT;
+        uint second_bn = bn % NINDIRECT;
+
+        if ((addr = ip->addrs[NDIRECT + 1]) == 0)
+            ip->addrs[NDIRECT + 1] = addr = balloc(ip->dev);
+
+        bp = bread(ip->dev, addr);
+        a = (uint *)bp->data;
+        if ((addr = a[first_bn]) == 0) {
+            a[first_bn] = addr = balloc(ip->dev);
+            log_write(bp);
+        }
+        brelse(bp);
+
+        bp = bread(ip->dev, addr);
+        a = (uint *)bp->data;
+        if ((addr = a[second_bn]) == 0) {
+            a[second_bn] = addr = balloc(ip->dev);
             log_write(bp);
         }
         brelse(bp);
@@ -408,6 +463,30 @@ void itrunc(struct inode *ip) {
         brelse(bp);
         bfree(ip->dev, ip->addrs[NDIRECT]);
         ip->addrs[NDIRECT] = 0;
+    }
+
+    if (ip->addrs[NDIRECT + 1]) {
+        bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+        a = (uint *)bp->data;
+        for (j = 0; j < NINDIRECT; j++) {
+            struct buf *bp2;
+            uint *a2;
+
+            if (a[j] == 0)
+                continue;
+
+            bp2 = bread(ip->dev, a[j]);
+            a2 = (uint *)bp2->data;
+            for (i = 0; i < NINDIRECT; i++) {
+                if (a2[i])
+                    bfree(ip->dev, a2[i]);
+            }
+            brelse(bp2);
+            bfree(ip->dev, a[j]);
+        }
+        brelse(bp);
+        bfree(ip->dev, ip->addrs[NDIRECT + 1]);
+        ip->addrs[NDIRECT + 1] = 0;
     }
 
     ip->size = 0;

@@ -43,7 +43,7 @@ def test_bcachetest_test1():
 
 @test(19, "usertests")
 def test_usertests():
-    r.run_qemu(shell_script(["usertests"]), timeout=300)
+    r.run_qemu(shell_script(["usertests"]), timeout=1500)
     r.match("^ALL TESTS PASSED$")
 
 

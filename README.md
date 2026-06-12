@@ -1,6 +1,6 @@
 # xv6-labs-2021
 
-这是一个基于 MIT 6.S081 / 6.828 2021 课程的 xv6-riscv 实验仓库。当前活动实验配置位于 `conf/lab.mk`，现在是 `LAB=net`；`dev/all` 分支上已经整合了 `util`、`syscall`、`pgtbl`、`traps`、`cow`、`thread` 和 `lock` 实验。
+这是一个基于 MIT 6.S081 / 6.828 2021 课程的 xv6-riscv 实验仓库。当前活动实验配置位于 `conf/lab.mk`，现在是 `LAB=net`；`dev/all` 分支上已经整合了 `util`、`syscall`、`pgtbl`、`traps`、`cow`、`thread`、`lock` 和 `fs` 实验。
 
 ## 目录说明
 
@@ -17,6 +17,7 @@
   - `grade-lab-cow`
   - `grade-lab-thread`
   - `grade-lab-lock`
+  - `grade-lab-fs`
   - `gradelib.py`
   - `server.py`
   - `ping.py`
@@ -78,10 +79,11 @@ make grade-traps
 make grade-cow
 make grade-thread
 make grade-lock
+make grade-fs
 make grade-all
 ```
 
-`make grade-all` 会先统一清理并构建一次系统产物，然后依次运行 `util` → `syscall` → `net` → `pgtbl` → `traps` → `cow` → `thread` → `lock` 的 grader；测试过程中仍会按用例重复启动 QEMU，但不会重复执行整仓库构建。
+`make grade-all` 会先统一清理并构建一次系统产物，然后依次运行 `util` → `syscall` → `net` → `pgtbl` → `traps` → `cow` → `thread` → `lock` → `fs` 的 grader；测试过程中仍会按用例重复启动 QEMU，但不会重复执行整仓库构建。
 
 ### net lab 手工测试
 
@@ -113,8 +115,75 @@ make ping
 ## 说明
 
 - `make grade` 会调用当前 `LAB` 对应的 grader；现在默认是 `grade-lab-net`。
-- `make grade-util`、`make grade-syscall`、`make grade-net`、`make grade-pgtbl`、`make grade-traps`、`make grade-cow`、`make grade-thread`、`make grade-lock`、`make grade-all` 适合 `dev/all` 分支上的阶段性回归验证。
+- `make grade-util`、`make grade-syscall`、`make grade-net`、`make grade-pgtbl`、`make grade-traps`、`make grade-cow`、`make grade-thread`、`make grade-lock`、`make grade-fs`、`make grade-all` 适合 `dev/all` 分支上的阶段性回归验证。
 - 当前 `dev/all` 集成状态已用 `make grade-all` 验证通过。
 - 默认的 `make qemu` / `make qemu-gdb` 不启用宿主机到 xv6 的 UDP 端口转发；只有 `make qemu-net` / `make qemu-gdb-net` 会打开 `hostfwd=udp::$(FWDPORT)-:2000`，避免非网络实验的评分过程额外依赖端口绑定。
 - 生成文件如 `fs.img`、`kernel/kernel`、`*.o`、`*.asm`、`*.sym`、`packets.pcap` 不应当作为源码提交。
 - 当前仓库已经补充了 `clangd` / `clang-format` / `compile_commands.json` 相关配置，适合继续做代码阅读和实验回顾。
+
+## 测试建议
+
+建议按改动范围分层运行测试，避免默认触发超长回归。
+
+### 快速检查
+
+适合小改动或先看是否能编译：
+
+```bash
+make kernel/kernel
+```
+
+如果想跑一套默认的轻量 smoke 回归，使用：
+
+```bash
+./quick.sh
+```
+
+它会统一构建一次，然后运行：
+
+- `grade-lab-util`
+- `grade-lab-syscall`
+- `grade-lab-net`
+- `grade-lab-pgtbl`
+- `grade-lab-traps`
+- `symlinktest`
+
+它故意不包含 `bigfile`、`grade-lab-lock`、`grade-lab-fs` 和完整 `grade-all`。
+
+### 定向检查
+
+适合改动某个 lab 或某个子系统后跑对应 grader：
+
+```bash
+make grade-syscall
+make grade-net
+make grade-lock
+make grade-fs
+```
+
+如果只想手工验证 `fs` 关键路径，优先跑：
+
+```bash
+make qemu
+```
+
+进入 xv6 后运行：
+
+```text
+symlinktest
+bigfile
+```
+
+### 完整回归
+
+只在阶段性集成完成或提交前运行：
+
+```bash
+make grade-all
+```
+
+说明：
+
+- `symlinktest` 成本低，适合频繁跑。
+- `bigfile` 会顺序写满并回读校验 doubly-indirect 文件，耗时明显更长。
+- `usertests` 覆盖面大，在 `FSSIZE=200000` 的集成分支上会比单 lab 分支慢很多。

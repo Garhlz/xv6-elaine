@@ -98,6 +98,7 @@ extern uint64 sys_connect(void);
 extern uint64 sys_pgaccess(void);
 extern uint64 sys_sigalarm(void);
 extern uint64 sys_sigreturn(void);
+extern uint64 sys_symlink(void);
 
 static uint64 (*syscalls[])(void) = {
     [SYS_fork] = sys_fork,         [SYS_exit] = sys_exit,         [SYS_wait] = sys_wait,
@@ -109,6 +110,7 @@ static uint64 (*syscalls[])(void) = {
     [SYS_link] = sys_link,         [SYS_mkdir] = sys_mkdir,       [SYS_close] = sys_close,
     [SYS_trace] = sys_trace,       [SYS_sysinfo] = sys_sysinfo,   [SYS_connect] = sys_connect,
     [SYS_pgaccess] = sys_pgaccess, [SYS_sigalarm] = sys_sigalarm, [SYS_sigreturn] = sys_sigreturn,
+    [SYS_symlink] = sys_symlink,
 };
 
 static char *syscall_names[] = {
@@ -120,7 +122,7 @@ static char *syscall_names[] = {
     [SYS_write] = "write",       [SYS_mknod] = "mknod",         [SYS_unlink] = "unlink",
     [SYS_link] = "link",         [SYS_mkdir] = "mkdir",         [SYS_close] = "close",
     [SYS_trace] = "trace",       [SYS_sysinfo] = "sysinfo",     [SYS_pgaccess] = "pgaccess",
-    [SYS_sigalarm] = "sigalarm", [SYS_sigreturn] = "sigreturn",
+    [SYS_sigalarm] = "sigalarm", [SYS_sigreturn] = "sigreturn", [SYS_symlink] = "symlink",
 };
 
 void syscall(void) {

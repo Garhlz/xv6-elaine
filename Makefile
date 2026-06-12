@@ -188,6 +188,8 @@ UPROGS=\
 	$U/_stats\
 	$U/_kalloctest\
 	$U/_bcachetest\
+	$U/_bigfile\
+	$U/_symlinktest\
 
 ifeq ($(LAB),lazy)
 UPROGS += \
@@ -206,13 +208,6 @@ ph: notxv6/ph.c
 
 barrier: notxv6/barrier.c
 	gcc -o barrier -g -O2 $(XCFLAGS) notxv6/barrier.c -pthread
-
-ifeq ($(LAB),fs)
-UPROGS += \
-	$U/_bigfile
-endif
-
-
 
 UEXTRA=
 UEXTRA += user/xargstest.sh
@@ -349,6 +344,12 @@ grade-lock:
           (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
 	./grade-lab-lock $(GRADEFLAGS)
 
+grade-fs:
+	@echo $(MAKE) clean
+	@$(MAKE) clean || \
+          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
+	./grade-lab-fs $(GRADEFLAGS)
+
 grade-all:
 	@echo $(MAKE) clean; \
 	$(MAKE) clean || \
@@ -363,6 +364,7 @@ grade-all:
 	./grade-lab-traps --no-make $(GRADEFLAGS); \
 	./grade-lab-cow --no-make $(GRADEFLAGS); \
 	./grade-lab-thread --no-make $(GRADEFLAGS); \
-	./grade-lab-lock --no-make $(GRADEFLAGS)
+	./grade-lab-lock --no-make $(GRADEFLAGS); \
+	./grade-lab-fs --no-make $(GRADEFLAGS)
 
 .PHONY: clean grade

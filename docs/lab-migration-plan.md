@@ -32,7 +32,7 @@
 4. `cow`（✅ 已完成）
 5. `thread`（✅ 已完成）
 6. `lock`（✅ 已完成）
-7. `fs`
+7. `fs`（✅ 已完成）
 8. `mmap`
 
 `net` 已完成，`util` 已完成，不需要再次迁移。
@@ -140,7 +140,7 @@
 - `make grade-pgtbl`
 - `make grade-all`
 
-其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow → thread → lock`（用户态 → 系统调用 → 驱动 → 内存管理 → 异常处理 → COW 内存管理 → 线程与并发练习 → 锁竞争优化）。
+其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow → thread → lock → fs`（用户态 → 系统调用 → 驱动 → 内存管理 → 异常处理 → COW 内存管理 → 线程与并发练习 → 锁竞争优化 → 文件系统）。
 
 注意：
 
@@ -181,7 +181,7 @@
 - `make grade-traps`
 - `make grade-all`
 
-其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow → thread → lock`。
+其中 `make grade-all` 顺序为 `util → syscall → net → pgtbl → traps → cow → thread → lock → fs`。
 
 注意：
 
@@ -325,6 +325,8 @@
 
 ## fs
 
+当前状态：已整合到 `dev/all`。
+
 官方内容：两部分：
 
 1. 支持大文件：引入 double-indirect block，扩大最大文件大小
@@ -346,10 +348,20 @@
 - `user/bigfile.c`
 - `user/symlinktest.c`
 - `Makefile`
+- `grade-lab-fs`
+
+验证方式：
+
+- `make grade-fs`
+- `make grade-lock`
+- `make grade-all`
 
 注意：
 
-- 这是后期改动面最大的实验之一，建议放在 `lock` 之后整合。
+- `dev/all` 保持 `LAB=net`，因此 `bigfile` / `symlinktest` 与 `grade-fs` 需要直接接入现有集成构建，而不是重新依赖 `ifeq ($(LAB),fs)`。
+- `sys_symlink()` 只创建并写入符号链接 inode，不要求目标存在，也不额外拒绝目录目标。
+- `sys_open()` 默认递归跟随符号链接，`O_NOFOLLOW` 下保留对符号链接自身的打开语义，并用固定深度上限防止环路。
+- 文件系统镜像大小已统一提升到 `FSSIZE=200000`，以支持 `bigfile`。
 
 ## mmap
 
