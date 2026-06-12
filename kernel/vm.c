@@ -17,6 +17,14 @@ extern char etext[]; // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+static int user_faultin(pagetable_t pagetable, uint64 va, int write) {
+    struct proc *p = myproc();
+
+    if (p == 0 || pagetable != p->pagetable)
+        return -1;
+    return mmap_fault(va, write);
+}
+
 // Make a direct-map page table for the kernel.
 pagetable_t kvmmake(void) {
     pagetable_t kpgtbl;
@@ -382,8 +390,13 @@ int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len) {
         if (va0 >= MAXVA)
             return -1;
         pte_t *pte = walk(pagetable, va0, 0);
-        if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
-            return -1;
+        if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0) {
+            if (user_faultin(pagetable, va0, 1) < 0)
+                return -1;
+            pte = walk(pagetable, va0, 0);
+            if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
+                return -1;
+        }
         pa0 = PTE2PA(*pte);
         if (pa0 == 0)
             return -1;
@@ -431,8 +444,13 @@ int copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len) {
     while (len > 0) {
         va0 = PGROUNDDOWN(srcva);
         pa0 = walkaddr(pagetable, va0);
-        if (pa0 == 0)
-            return -1;
+        if (pa0 == 0) {
+            if (user_faultin(pagetable, va0, 0) < 0)
+                return -1;
+            pa0 = walkaddr(pagetable, va0);
+            if (pa0 == 0)
+                return -1;
+        }
         n = PGSIZE - (srcva - va0);
         if (n > len)
             n = len;
@@ -456,8 +474,13 @@ int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max) {
     while (got_null == 0 && max > 0) {
         va0 = PGROUNDDOWN(srcva);
         pa0 = walkaddr(pagetable, va0);
-        if (pa0 == 0)
-            return -1;
+        if (pa0 == 0) {
+            if (user_faultin(pagetable, va0, 0) < 0)
+                return -1;
+            pa0 = walkaddr(pagetable, va0);
+            if (pa0 == 0)
+                return -1;
+        }
         n = PGSIZE - (srcva - va0);
         if (n > max)
             n = max;

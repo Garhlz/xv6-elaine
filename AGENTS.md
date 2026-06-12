@@ -58,6 +58,6 @@ When migrating a lab from its reference branch to `dev/all`:
 
 ### Grading Conventions
 
-- `make grade-all` order: **util → syscall → net → pgtbl** (course-natural path: user-space tools, then system calls, then drivers, then memory management).
+- `make grade-all` order: **util → syscall → net → pgtbl → traps → cow → thread → lock → fs → mmap**.
 - `conf/lab.mk` keeps `LAB=net` with a comment explaining that `dev/all` integrates multiple labs; this ensures net-specific kernel objects and QEMU flags are always active.
 - **Remove `time.txt` checks** from all graders. The `@test(1, "time")` / `check_time()` block in every grader script should be deleted — `time.txt` is a course hand-in artifact that is irrelevant for `dev/all`.

@@ -8,6 +8,8 @@
 
 void mmap_test(void);
 void fork_test(void);
+void shared_exit_writeback_test(void);
+void read_into_fresh_mmap_test(void);
 char buf[BSIZE];
 
 #define MAP_FAILED ((char *)-1)
@@ -15,6 +17,8 @@ char buf[BSIZE];
 int main(int argc, char *argv[]) {
     mmap_test();
     fork_test();
+    shared_exit_writeback_test();
+    read_into_fresh_mmap_test();
     printf("mmaptest: all tests succeeded\n");
     exit(0);
 }
@@ -231,4 +235,101 @@ void fork_test(void) {
     _v1(p2);
 
     printf("fork_test OK\n");
+}
+
+void shared_exit_writeback_test(void) {
+    int fd;
+    int pid;
+    int status = -1;
+    const char *const f = "mmap.exit";
+
+    printf("shared_exit_writeback_test starting\n");
+    testname = "shared_exit_writeback_test";
+
+    unlink(f);
+    if ((fd = open(f, O_CREATE | O_RDWR)) < 0)
+        err("open");
+    memset(buf, 'A', BSIZE);
+    if (write(fd, buf, BSIZE) != BSIZE)
+        err("write");
+    close(fd);
+
+    if ((pid = fork()) < 0)
+        err("fork");
+    if (pid == 0) {
+        if ((fd = open(f, O_RDWR)) < 0)
+            err("child open");
+        char *p = mmap(0, PGSIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        if (p == MAP_FAILED)
+            err("child mmap");
+        close(fd);
+        p[0] = 'Z';
+        p[1] = 'Z';
+        exit(0);
+    }
+
+    wait(&status);
+    if (status != 0)
+        err("child failed");
+
+    if ((fd = open(f, O_RDONLY)) < 0)
+        err("reopen");
+    if (read(fd, buf, 2) != 2)
+        err("readback");
+    close(fd);
+    unlink(f);
+
+    if (buf[0] != 'Z' || buf[1] != 'Z')
+        err("exit writeback");
+
+    printf("shared_exit_writeback_test OK\n");
+}
+
+void read_into_fresh_mmap_test(void) {
+    int src, backing;
+    const char *const srcfile = "mmap.src";
+    const char *const backingfile = "mmap.backing";
+
+    printf("read_into_fresh_mmap_test starting\n");
+    testname = "read_into_fresh_mmap_test";
+
+    unlink(srcfile);
+    unlink(backingfile);
+
+    if ((src = open(srcfile, O_CREATE | O_RDWR)) < 0)
+        err("open src");
+    if (write(src, "hello", 5) != 5)
+        err("write src");
+    close(src);
+
+    if ((backing = open(backingfile, O_CREATE | O_RDWR)) < 0)
+        err("open backing");
+    memset(buf, 0, BSIZE);
+    if (write(backing, buf, BSIZE) != BSIZE)
+        err("write backing");
+    close(backing);
+
+    if ((src = open(srcfile, O_RDONLY)) < 0)
+        err("reopen src");
+    if ((backing = open(backingfile, O_RDWR)) < 0)
+        err("reopen backing");
+
+    char *p = mmap(0, PGSIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE, backing, 0);
+    if (p == MAP_FAILED)
+        err("mmap");
+    close(backing);
+
+    if (read(src, p, 5) != 5)
+        err("read into mmap");
+    close(src);
+
+    if (memcmp(p, "hello", 5) != 0)
+        err("content mismatch");
+    if (munmap(p, PGSIZE) < 0)
+        err("munmap");
+
+    unlink(srcfile);
+    unlink(backingfile);
+
+    printf("read_into_fresh_mmap_test OK\n");
 }

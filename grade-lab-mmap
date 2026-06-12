@@ -50,4 +50,14 @@ def test_mmaptest_fork_test():
     r.match("^fork_test OK$")
 
 
+@test(10, "mmaptest: shared exit writeback", parent=test_mmaptest)
+def test_mmaptest_shared_exit_writeback():
+    r.match("^shared_exit_writeback_test OK$")
+
+
+@test(10, "mmaptest: read into fresh mmap", parent=test_mmaptest)
+def test_mmaptest_read_into_fresh_mmap():
+    r.match("^read_into_fresh_mmap_test OK$")
+
+
 run_tests()

@@ -768,9 +768,8 @@ int mmap_cleanup(struct proc *p, int force) {
         if (force) {
             // Best-effort writeback, then unmap regardless.
             if ((vma->flags & MAP_SHARED) && (vma->prot & PROT_WRITE))
-                mmap_writeback(p, vma, vma->addr, vma->length);
-            uvmunmap_mmap(p->pagetable, vma->addr,
-                          (vma->length + PGSIZE - 1) / PGSIZE, 1);
+                mmap_writeback(p, vma, vma->addr, vma->addr + vma->length);
+            uvmunmap_mmap(p->pagetable, vma->addr, (vma->length + PGSIZE - 1) / PGSIZE, 1);
             fileclose(vma->file);
             memset(vma, 0, sizeof(*vma));
         } else {

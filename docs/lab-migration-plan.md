@@ -399,8 +399,11 @@
 - `mmap` 在 `dev/all` 中复用现有 syscall 编号 `SYS_mmap=27`、`SYS_munmap=28`，不会覆盖后续 net/pgtbl 编号。
 - `usertrap()` 中 COW store fault 优先，mmap 只处理 load fault 或非 COW store fault，避免回归 cow lab。
 - VMA 采用固定 mmap 区间和 lazy fault-in；`munmap()` 支持 whole / prefix / suffix，不实现中间 punch hole。
+- `copyin()`、`copyout()`、`copyinstr()` 会在 syscall buffer 指向尚未 fault-in 的 mmap 页时主动触发 mmap fault；`copyout()` 仍拒绝写入普通只读页，只允许 COW 页按需 break。
 - `MAP_SHARED` 写回只处理已经 fault-in 的页，未映射页允许跳过。
+- `exit()` 对 `MAP_SHARED | PROT_WRITE` VMA 做 best-effort 写回，写回区间使用 `[addr, addr + length)`；`grade-mmap` 增加了直接退出写回回归测试。
 - `grade-lab-mmap` 已移除 `time` 和完整 `usertests` 检查；完整 `usertests` 在当前 fs 集成后会被 `MAXFILE` 放大，适合通过 `grade-fs` / `grade-all` 的重型回归覆盖。
+- 当前 `fork()` 仍是课程级 mmap 语义，复制 VMA 元数据但不复制或共享已 fault-in 的 mmap PTE；完整 Unix 语义已记录到 `docs/TODO.md`。
 
 ## 本地分支与迁移记录
 

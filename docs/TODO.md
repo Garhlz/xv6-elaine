@@ -41,7 +41,7 @@
   - `flags` 必须且只能包含 `MAP_SHARED` 或 `MAP_PRIVATE`
   - `addr` 当前不支持时应明确忽略或拒绝
 - 审计 `PROT_NONE`、`PROT_EXEC`、只写映射等边界语义。
-- 评估 `copyin`、`copyout`、`copyinstr` 遇到 lazy mmap 页时是否应主动 fault-in，避免只有用户态 load/store 才能触发映射。
+- 持续审计 `copyin`、`copyout`、`copyinstr` 对 lazy mmap 页的主动 fault-in 行为；当前已覆盖 `read(fd, fresh_mmap_addr, n)`，后续继续补充跨页、字符串和错误权限路径。
 - 为 `MAP_SHARED` 写回增加更精确的策略：
   - 当前保守写回已 fault-in 页。
   - 后续可评估 dirty bit 或软件 dirty 标记。
@@ -51,9 +51,12 @@
 - 审计 `fork()` 失败路径：
   - VMA `filedup()` 后如果 `uvmcopy()` 失败，必须释放子进程 VMA file refs。
   - open file、cwd、VMA 的引用释放顺序要一致。
+- 补齐完整 Unix mmap fork 语义：
+  - `MAP_PRIVATE` 已 fault-in 且已修改页面应在 fork 时形成快照。
+  - `MAP_SHARED` 已 fault-in 页面应在父子之间保持共享或至少保持可见的一致写回语义。
 - 审计 `exec()` 与 mmap 的关系：
-  - 当前进程地址空间被替换前是否需要清理所有 VMA。
-  - `MAP_SHARED` 页面是否应在 `exec()` 前写回。
+  - 当前实现会在提交新地址空间前清理所有 VMA，但失败路径可能已经部分拆掉旧映射。
+  - 后续应拆成 `flush all` 和 `discard all` 两阶段：先完成所有可失败写回，再执行不可失败拆映射。
 - 审计 `exit()` 中 mmap 写回失败策略：
   - xv6 风格下可以忽略错误，但应在代码注释中说明。
   - 避免失败路径泄露 file refs 或物理页。
