@@ -1,141 +1,118 @@
 # TODO
 
-## 近期任务
+当前 `dev/all` 已完成 `util`、`syscall`、`pgtbl`、`traps`、`cow`、`thread`、`net`、`lock`、`fs`、`mmap` 的功能整合。后续重点从“迁移 lab”转为“整理集成后的教学 OS 工程质量”。
 
-- 完成 `fs` lab 在 `dev/all` 上的迁移、联调和回归验证。
-- 完成 `mmap` lab 在 `dev/all` 上的迁移、联调和回归验证。
-- 在 `fs` 和 `mmap` 迁移完成后，再统一收口测试框架和工程化改进，避免中途同时改功能代码和基础设施。
+## P0：稳定基线与工程地基
 
-## 测试框架迁移
+- 推送当前 `dev/all` 稳定点，作为“所有 lab 已集成”的远端基线。
+- 重构 `Makefile`，把构建产物移出源码目录：
+  - 目标目录建议为 `build/kernel/`、`build/user/`、`build/mkfs/`、`build/fs.img`。
+  - 移出 `*.o`、`*.d`、`*.asm`、`*.sym`、`user/_*`、`kernel/kernel`、`mkfs/mkfs`、`fs.img`。
+  - 保持现有 `make qemu`、`make grade-*`、`make clean` 入口兼容。
+  - 避免多个 grader 并行或连续运行时互相清理构建产物。
+- 整理 `.gitignore`，确保生成物、QEMU 输出、pcap、临时日志不会污染工作区。
+- 给 `Makefile` 增加清晰分层目标：
+  - `make build`
+  - `make image`
+  - `make smoke`
+  - `make grade-<lab>`
+  - `make regression`
+  - `make grade-all-heavy`
 
-- 将当前 Python grader/测试编排脚本逐步迁移到 Go。
-- 保留“宿主机外部驱动 QEMU + xv6 内部测试程序自检”的总体测试模型，不引入内核内大型测试框架。
-- 测试框架迁移后的主目标不是复刻课程 grader 的分数模型，而是建立更适合持续开发的功能测试体系。
-- 迁移时优先抽象公共能力：
-  - QEMU 启动与关闭
-  - 超时控制
-  - 串口输出采集与匹配
-  - 测试失败日志落盘
-  - 端口/环境准备
-- 初期保留每个 lab 的独立 grader 入口，避免一开始就把测试定义过度集中化。
+## P1：VM 与缺页路径整理
 
-## 测试入口重构方向
+- 把 `trap.c` 中的用户态 page fault 处理抽成独立函数，例如 `handle_user_page_fault(scause, stval)`。
+- 明确 fault 分派优先级：
+  - COW store fault
+  - mmap load/store fault
+  - 非法访问并 kill
+- 把 COW 处理逻辑从 `usertrap()` 中拆出，例如 `cow_fault(pagetable, va)`。
+- 把 mmap fault 处理逻辑和 VMA 查询逻辑集中到更明确的模块边界，避免 `proc.c` 继续膨胀。
+- 增加注释说明 `scause=13`、`scause=15`、`PTE_COW`、VMA lazy page 的交互关系。
+- 保持 `alarm` 和 device interrupt 路径不被 page fault 重构影响。
 
-- 保留 `grade-*`，但降级为兼容回归入口。
-- `grade-*` 不再作为日常开发主入口，只在里程碑、发布前或对照课程 grader 时运行。
-- 可以新增 `make test-legacy` 统一承接课程 grader 兼容回归。
-- 新建按功能分类的测试入口：
-  - `make test-smoke`
-  - `make test-proc`
-  - `make test-vm`
-  - `make test-fs`
-  - `make test-syscall`
-  - `make test-net`
-  - `make test-lock`
-  - `make test-user`
-  - `make test-all`
+## P2：mmap 语义补强
 
-## 测试组织优化
+- 支持 VMA hole reuse，避免 `mmap_top` 只增不减导致长运行进程耗尽 mmap 区间。
+- 支持中间 `munmap` 的 VMA split，而不仅是 whole / prefix / suffix。
+- 严格校验 mmap 参数：
+  - `offset` 页对齐
+  - `prot` 只包含合法位
+  - `flags` 必须且只能包含 `MAP_SHARED` 或 `MAP_PRIVATE`
+  - `addr` 当前不支持时应明确忽略或拒绝
+- 审计 `PROT_NONE`、`PROT_EXEC`、只写映射等边界语义。
+- 评估 `copyin`、`copyout`、`copyinstr` 遇到 lazy mmap 页时是否应主动 fault-in，避免只有用户态 load/store 才能触发映射。
+- 为 `MAP_SHARED` 写回增加更精确的策略：
+  - 当前保守写回已 fault-in 页。
+  - 后续可评估 dirty bit 或软件 dirty 标记。
 
-- 继续把 grader 共性逻辑下沉到公共库层，suite 级脚本只保留测试定义和少量特例。
-- 明确区分“构建一次”和“重复运行测试用例”的职责，减少重复准备逻辑。
-- 给长耗时测试补充更清楚的阶段输出，帮助区分“正常慢”与“异常卡住”。
-- 已提供临时开发回归脚本 `./quick.sh`；后续再把 `quick` / `full` 两档执行模式正式并入测试系统。
-- 保持测试输出稳定，避免写过于脆弱的精确文本匹配。
-- `make grade-all` 的长期方向不是继续按 `util -> syscall -> ... -> lock` 一条龙串行执行，而是映射为功能测试集合。
-- 支持单次启动 QEMU 执行一组 xv6 命令，减少“每个 case 启一次 QEMU”的整机重启开销。
-- 把 `usertests` 拆成更小的功能回归集，例如 `proc`、`fs`、`vm` 子集，而不是长期依赖整包大测试。
-- 支持增量测试建议：
-  - 修改 `kernel/bio.c` 时，优先建议跑 `test-lock` 和 `test-fs`
-  - 修改 `kernel/vm.c` 时，优先建议跑 `test-vm` 和 `test-user`
-  - 修改 `kernel/proc.c` 时，优先建议跑 `test-proc`
-- 区分默认开发回归和扩展压力测试，不把 `kalloctest`、`ph_fast`、完整 `usertests` 这类重型项放进每次默认开发循环。
+## P3：资源生命周期与错误路径审计
 
-## 测试分级
+- 审计 `fork()` 失败路径：
+  - VMA `filedup()` 后如果 `uvmcopy()` 失败，必须释放子进程 VMA file refs。
+  - open file、cwd、VMA 的引用释放顺序要一致。
+- 审计 `exec()` 与 mmap 的关系：
+  - 当前进程地址空间被替换前是否需要清理所有 VMA。
+  - `MAP_SHARED` 页面是否应在 `exec()` 前写回。
+- 审计 `exit()` 中 mmap 写回失败策略：
+  - xv6 风格下可以忽略错误，但应在代码注释中说明。
+  - 避免失败路径泄露 file refs 或物理页。
+- 审计 `mappages()`、`kalloc()`、`readi()`、`writei()` 失败后的资源回收。
+- 审计 COW 引用计数与 `uvmunmap()`、`uvmunmap_mmap()`、`copyout()` 的交互。
 
-- `smoke`：目标 30 秒内，提交前必跑。
-- `core`：目标 2 到 5 分钟，作为日常回归主力。
-- `full`：完整系统回归，在阶段性验证、发布前或 CI 中运行。
-- `stress`：长时压力测试，不默认运行。
+## P4：锁与引用关系文档化
 
-## 最小测试集设计
+- 新增一份短文档，例如 `docs/kernel-lifetime-notes.md`，记录关键所有权关系：
+  - `struct file` refcount：`open`、`dup`、`fork`、`mmap`、`close`、`exit`
+  - `struct inode` lock/ref：`ilock`、`iput`、`iunlockput`
+  - COW physical page refcount：`uvmcopy`、page fault、`kfree`
+  - VMA file refs：`mmap`、`munmap`、`fork`、`exit`
+- 记录常见锁顺序，尤其是 `wait_lock`、`p->lock`、inode sleeplock、bcache bucket lock。
+- 给复杂路径补充最少量注释，优先解释“不变量”和“为什么这么做”，不要解释显而易见的赋值。
 
-- 每个功能分类都提供最小可用测试集，避免默认执行重型全量回归。
-- 示例：
-  - `test-vm-smoke`：`cowtest simple`、`pgaccess`、`ugetpid`
-  - `test-fs-smoke`：`bigfile`、`dirfile`、`bigdir`
-  - `test-lock-smoke`：`kalloctest test1/test2`、`bcachetest`
+## P5：测试系统重构
 
-## 功能测试拆分建议
-
-- `proc`
-  - `forktest`
-  - `exitwait`
-  - `killstatus`
-  - `preempt`
-- `vm`
-  - `cowtest`
-  - `pgaccess`
-  - `ugetpid`
-  - `sbrkmuch`
-- `fs`
+- 保留 `grade-*` 作为课程 grader 兼容入口，但不要把它作为日常开发唯一入口。
+- 将 `quick.sh` 正式并入 `Makefile`，形成 `make smoke`。
+- 新增分层测试入口：
+  - `make smoke`：提交前快速检查，目标 30 到 90 秒。
+  - `make regression`：日常中等回归，目标 2 到 5 分钟。
+  - `make grade-all-heavy`：完整重型回归，包含 `bigfile`、完整 `usertests`、lock/fs 压力项。
+  - `make stress`：长时压力测试，默认不跑。
+- 拆分 `usertests`：
+  - `proc`：`forktest`、`exitwait`、`killstatus`、`preempt`
+  - `vm`：`cowtest`、`pgaccess`、`ugetpid`、`sbrkmuch`
+  - `fs`：`bigfile`、`dirfile`、`bigdir`、`iref`、`openiput`
+  - `syscall`：`trace`、`sysinfotest`、`alarmtest`
+  - `net`：`nettests`
+  - `lock`：`kalloctest`、`bcachetest`、`stats`
+- 明确默认测试不包含以下重型项：
   - `bigfile`
-  - `dirfile`
-  - `bigdir`
-  - `iref`
-  - `openiput`
-- `syscall`
-  - `trace`
-  - `sysinfotest`
-  - `alarmtest`
-- `net`
-  - `nettests`
-- `lock`
-  - `kalloctest`
-  - `bcachetest`
-  - `stats`
-- `user`
-  - 保留拆分后的 `usertests` 子集，而不是继续依赖整个大包
+  - `usertests writebig`
+  - 完整 `usertests`
+  - `grade-lab-lock` 全量压力项
+- 支持单次启动 QEMU 执行一组 xv6 命令，减少每个 case 重启 QEMU 的成本。
+- 长期可把 Python grader 公共逻辑迁移到 Go，但应在 Makefile 和测试分层稳定后再做。
 
-## 测试清单与目录形态
+## P6：文件系统大文件测试成本优化
 
-- 迁移后的长期目录目标可以类似：
-  - `tests/smoke/`
-  - `tests/proc/`
-  - `tests/vm/`
-  - `tests/fs/`
-  - `tests/syscall/`
-  - `tests/net/`
-  - `tests/lock/`
-  - `tests/user/`
-  - `scripts/test_runner.go`
-  - `scripts/qemu_expect.go`
-- 每个测试建议定义为 manifest 或结构化数据，至少包含：
-  - 测试名
-  - 所属 suite
-  - 超时时间
-  - xv6 内执行命令
-  - 期望输出
-- 长期目标是摆脱课程 grader 的“分数模型”，转向自己的测试清单模型。
+- 明确区分“基础 FS 正确性”和“double-indirect 最大文件”测试。
+- 避免让所有完整 `usertests` 默认继承放大后的 `MAXFILE` 写盘成本。
+- 可以考虑为 `usertests writebig` 使用单独较小上限，保留 `bigfile` 专门测试 65,803 blocks。
+- 在 README 中持续维护长耗时测试说明，标明哪些慢属于正常现象。
 
-## 输出格式目标
+## P7：CI 与发布流程
 
-- 测试输出以 `PASS/FAIL`、用例名称、运行时长、失败日志路径、子系统标签为主。
-- 不再把 `Score: 69/69` 作为主要反馈形式。
-- 目标示例：
-  - `[PASS] vm:cow_simple 3.2s`
-  - `[PASS] fs:bigdir 5.8s`
-  - `[FAIL] lock:bcache_stress 22.1s`
-
-## 迁移顺序建议
-
-- 先保留现有 `grade-*`，同时新增 `make test-*`。
-- 先把 `grade-all` 中的内容映射到功能分类测试集合。
-- 优先把 `usertests` 中高价值项拆出来独立运行。
-- 再实现统一的 Go `test_runner`，逐步替代按 lab 划分的课程 grader。
-- 最后再把 `grade-*` 挪到 `legacy` 层，或只保留兼容入口。
-
-## 文档与维护
-
-- 在测试框架迁移到 Go 后，补充一份新的测试架构说明文档，说明包结构、执行流程和扩展方式。
-- 在 `README.md` 中补充常见长耗时测试说明，标明哪些测试慢属于正常现象。
+- 默认 CI 只跑轻量或中等回归：
+  - `make smoke`
+  - `make grade-mmap`
+  - `make grade-cow`
+  - `make grade-traps`
+- 重型回归用手动触发或夜间任务：
+  - `make grade-all-heavy`
+  - `make stress`
+- 每次提交前至少跑：
+  - `git diff --check`
+  - `make kernel/kernel fs.img`
+  - 与改动子系统对应的定向测试
+- 每次阶段性合并前跑完整重型回归，并记录耗时和失败日志路径。

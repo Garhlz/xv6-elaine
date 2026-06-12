@@ -8,6 +8,7 @@
 - `user/`：用户态程序与实验测试程序，例如 `nettests`。
 - `mkfs/`：构建 `fs.img` 的宿主机工具。
 - `conf/`：实验配置。
+- `docs/`：整合记录、TODO 和后续工程化计划。
 - 根目录脚本：
   - `grade-lab-util`
   - `grade-lab-syscall`
@@ -122,6 +123,23 @@ make ping
 - 默认的 `make qemu` / `make qemu-gdb` 不启用宿主机到 xv6 的 UDP 端口转发；只有 `make qemu-net` / `make qemu-gdb-net` 会打开 `hostfwd=udp::$(FWDPORT)-:2000`，避免非网络实验的评分过程额外依赖端口绑定。
 - 生成文件如 `fs.img`、`kernel/kernel`、`*.o`、`*.asm`、`*.sym`、`packets.pcap` 不应当作为源码提交。
 - 当前仓库已经补充了 `clangd` / `clang-format` / `compile_commands.json` 相关配置，适合继续做代码阅读和实验回顾。
+
+## 当前状态
+
+- 计划内 lab 已全部整合到 `dev/all`：`util`、`syscall`、`pgtbl`、`traps`、`cow`、`thread`、`net`、`lock`、`fs`、`mmap`。
+- `conf/lab.mk` 仍保持 `LAB=net`，用于保留 net 相关编译宏和 QEMU 网络配置；`dev/all` 的其他 lab 功能是无条件集成。
+- `docs/lab-migration-plan.md` 记录 lab 迁移历史和关键取舍。
+- `docs/TODO.md` 记录迁移完成后的工程化路线图。
+
+## 后续开发重点
+
+建议先做工程地基，再做内核语义增强：
+
+1. 重构 `Makefile`，把构建产物移到 `build/`，避免源码树和生成物混在一起。
+2. 整理 VM fault path，把 COW 和 mmap 缺页处理从 `trap.c` 中拆出清晰边界。
+3. 审计 mmap、fork、exec、exit 的资源生命周期和错误路径。
+4. 把 `quick.sh` 正式并入 Makefile，形成 `make smoke` / `make regression` / `make grade-all-heavy` 等分层测试入口。
+5. 拆分完整 `usertests`，避免默认测试被 `MAXFILE` 和 `FSSIZE=200000` 放大成重型写盘回归。
 
 ## 测试建议
 

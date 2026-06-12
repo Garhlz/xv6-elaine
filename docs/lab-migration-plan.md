@@ -16,12 +16,12 @@
 - fs：<https://pdos.csail.mit.edu/6.828/2021/labs/fs.html>
 - mmap：<https://pdos.csail.mit.edu/6.828/2021/labs/mmap.html>
 
-## 总体建议
+## 总体策略
 
 - 以功能为单位迁移，不直接整分支 merge。
 - 优先迁移“实验必需代码”，跳过 `.vscode/`、格式化、临时文件、测试产物。
 - 每整合一个实验，就单独提交并跑对应测试。
-- `net` 已经在 `dev/all` 中，后续实验应以它为基线继续叠加。
+- `net` 是 `dev/all` 的活动 lab 配置基线，其他实验功能在 `dev/all` 中无条件集成。
 - 当前 `make grade-all` 已串联 `util → syscall → net → pgtbl → traps → cow → thread → lock → fs → mmap`，并复用一次统一构建产物。
 
 ## 建议整合顺序
@@ -35,7 +35,7 @@
 7. `fs`（✅ 已完成）
 8. `mmap`（✅ 已完成）
 
-`net` 已完成，`util` 已完成，不需要再次迁移。
+`net` 已完成，`util` 已完成，不需要再次迁移。当前文档作为迁移记录保留；新的工程化工作请以 `docs/TODO.md` 为准。
 
 ## syscall
 
@@ -402,7 +402,7 @@
 - `MAP_SHARED` 写回只处理已经 fault-in 的页，未映射页允许跳过。
 - `grade-lab-mmap` 已移除 `time` 和完整 `usertests` 检查；完整 `usertests` 在当前 fs 集成后会被 `MAXFILE` 放大，适合通过 `grade-fs` / `grade-all` 的重型回归覆盖。
 
-## 本地分支与迁移策略
+## 本地分支与迁移记录
 
 当前本地存在这些实验分支：
 
@@ -417,16 +417,18 @@
 - `fs`
 - `mmap`
 
-建议在 `dev/all` 上采用以下策略：
+迁移时采用过以下策略，后续如果需要重新对照参考分支，可继续沿用：
 
 1. 先用 `git diff <base>..<branch> --name-only` 确认该实验真正涉及的文件。
 2. 优先手工迁移“实验功能代码”。
 3. 若某个实验分支只有 1 到 2 个清晰提交，再考虑 `cherry-pick`。
 4. 工具链、格式化、README、临时文件不要和实验功能混提。
 
-## 后续建议
+## 后续维护
 
-所有计划内实验已整合。后续如继续重构测试系统或整理实现，每次仍保持一份独立提交，提交信息建议统一成：
+所有计划内实验已整合。后续重点已经转为构建系统、测试系统和内核语义整理，详见 `docs/TODO.md`。
+
+如继续做 lab 相关修复或补充，每次仍保持一份独立提交。提交信息可沿用：
 
 ```text
 feat(<lab>): integrate <lab> lab changes
