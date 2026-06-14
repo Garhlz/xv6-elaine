@@ -38,6 +38,7 @@ Recent history uses short, imperative or descriptive commit subjects such as `fi
 
 - After editing any header, run `clangd --check=<file>` to catch forward-reference or missing-type errors. Headers must be **self-contained**: include their own `#include` dependencies (e.g. `types.h` for `uint64`).
 - Before every commit, run `clang-format -i` on every changed `.c` and `.h` file. The repository `.clang-format` uses 4-space indent, LLVM base style.
+- When writing or translating comments, **keep English names** for technical terms, structs, functions, and macros alongside the Chinese explanation — e.g. "超级块 (superblock)"、"inode 表 (itable)"、"空闲位图 (bitmap)"、"间接块 (indirect block)"、"引用计数 (ref)"。
 
 ### Lab Migration Workflow
 

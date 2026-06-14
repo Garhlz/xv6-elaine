@@ -104,7 +104,114 @@
 - 可以考虑为 `usertests writebig` 使用单独较小上限，保留 `bigfile` 专门测试 65,803 blocks。
 - 在 README 中持续维护长耗时测试说明，标明哪些慢属于正常现象。
 
-## P7：CI 与发布流程
+## P7：缓冲缓存 LRU 策略优化
+
+当前 `bio.c` 使用近似 LRU：`brelse()` 打 `timestamp`（ticks），`bget()` miss 时全桶扫描选最老 victim。这个方案有两个明显不足：
+
+- **全桶扫描成本高**：每次 miss 都要遍历所有桶的所有 buf 去比大小，随 NBUF 增大线性恶化。
+- **单次访问即可"翻新"**：只要 refcnt 短暂 > 0（哪怕只是日志层 bpin/bunpin 的一瞬间），`brelse()` 就会更新 timestamp，导致只被用过一两次的冷块和反复访问的热块在 LRU 序上无差别。
+
+计划方向：引入接近 InnoDB-style 的 **old / young 双链表**（或称 old / young 分区）：
+
+- 将每个桶的链表拆为 **old 区**（靠近哨兵头，候选淘汰）和 **young 区**（远离哨兵头，受保护）。
+- 新块首次插入时进入 old 区的中间位置（而非链表头），给它一个"考察期"。
+- 只有当块在 old 区期间被再次访问（refcnt 从 0 升到 > 0 再回到 0），才晋升到 young 区。
+- young 区满时，最久未访问的 young 块降级回 old 区。
+- 淘汰永远从 old 区头部选取，不再需要全桶扫描 timestamp。
+- 保留 `evict_lock` 的串行化角色；old/young 迁移逻辑在持对应桶锁下完成。
+- `bpin/bunpin` 仅影响 refcnt，不作为晋升依据（避免日志层的短暂 pin 触发晋升）。
+
+这样做的好处：
+
+- **O(1) 淘汰**：old 区头部就是 victim，无需扫描。
+- **抵抗扫描污染**：一次性的大文件顺序读（扫描大量块但每个只用一次）不会把热块挤出缓存——扫描来的块只停留在 old 区，用完就被淘汰。
+- **语义清晰**：old = "可能只被用一次的冷数据"，young = "多次被访问的热数据"。
+
+实现时的注意事项：
+
+- old/young 的比例需要可调（例如通过 `#define OLD_PCT 37`，按百分比划分）。
+- 晋升和降级的时机要精确文档化——特别是和 `bpin/bunpin`、`brelse` 的交互。
+- 必须保持 `bread/bwrite/brelse/bpin/bunpin/binit` 的外部行为不变。
+- 重构后需要全量回归：`grade-fs`（bigfile + symlinktest + usertests）、`grade-lock`（bcache 竞争压力）、`grade-mmap`（mmap 写回路径走 bcache）。
+
+## P8：日志系统 WAL 提交路径优化
+
+当前 `log.c` 的 `commit()` 在 `write_head()` 之后通过 `install_trans(0)`
+将日志区块的内容反向拷贝回 home block。正常提交路径下这是冗余的——home buffer
+已被 `log_write()` 调用 `bpin()` 钉在缓存中，其 `data[]` 就是事务的最终内容。
+
+### 核心优化：正常提交直接安装 pinned home buffer（推荐优先级最高）
+
+**现状**：
+
+```
+write_log()     → home → log 区 (bread + memmove + bwrite)
+write_head()    → commit point
+install_trans() → log 区 → home (bread + memmove + bwrite + bunpin)  ← 冗余
+clear head
+```
+
+**优化后**：
+
+```
+write_log()              → home → log 区
+write_head()             → commit point
+install_trans_normal()   → 直接 bwrite(home buffer) + bunpin        ← 跳过 log 反向读+拷贝
+clear head
+```
+
+做法：将 `install_trans()` 拆为两个版本：
+
+- `install_trans_recover()` — 恢复路径，从日志区 `bread()` 并重放到数据区。
+- `install_trans_normal()` — 正常提交路径，直接 `bwrite(home buffer)` + `bunpin()`，
+  利用 `log_write()` 已 pin 的 home buffer 绕过日志区反向拷贝。
+
+收益：正常提交每块省去一次 `bread(log block)` + 一次 `BSIZE memmove`（1024B 拷贝）+
+一次 buffer cache 查找和锁开销。恢复路径保持不变，WAL 崩溃一致性不变。
+
+**关键正确性条件**：
+
+1. `write_log()` 必须先于 `write_head()`（WAL 顺序）
+2. `write_head()` 必须先于 `install_trans_normal()`（提交点先于安装）
+3. `install_trans_normal()` 只能用于正常 commit，不能用于 recovery
+4. recovery 仍然必须从日志区 `bread()` 并 replay
+5. `log_write()` 必须 `bpin()` home buffer；`install_trans_normal()` 写完必须 `bunpin()`
+6. commit 期间 `log.committing == 1`，阻止新 FS 修改混入
+
+### 进阶优化：内存日志中缓存 pinned buffer 指针（方案 1 稳定后考虑）
+
+在 `struct log` 中增加 `struct buf *bufs[LOGSIZE]`（纯内存字段，不写盘），
+`log_write()` 时记录 pin 的 buf 指针，后续 `write_log()` 和 `install_trans_normal()`
+直接用指针访问而非按块号重新 `bread()`。进一步减少 buffer cache 查找开销。
+
+注意：通过 `bufs[]` 直接访问 `data[]` 前应持有 `b->lock`（即便 `outstanding==0`
+时理论上无并发修改者，持锁语义更完整）。
+
+### 防御性加固
+
+- `read_head()` 增加日志头边界检查：`lh->n < 0 || lh->n > LOGSIZE || lh->n > log.size - 1`。
+  防止磁盘日志头损坏导致恢复路径越界。
+- `bunpin()` 和 `brelse()` 增加 `refcnt < 1` 的 `panic` 检查，及早暴露 pin/unpin 不匹配。
+
+### 可观测性：日志统计
+
+在 `struct log` 中增加 `logstats`（commits、logged_blocks、absorbed_blocks、
+begin_sleep_commit、begin_sleep_space、install_blocks），在相应路径更新，
+通过 `sysinfo` 或新 syscall 暴露，用于验证优化效果。
+
+### 不建议做的
+
+- **metadata-only journaling** — 改变语义，非小优化。
+- **允许 commit 期间新事务进入** — 需要双缓冲或 multiple generation，复杂度高。
+- **异步 commit** — xv6 无 fsync 语义，会导致返回和持久化不一致。
+- **checksum / sequence number** — 会改磁盘格式，不适合作为第一步。
+
+### 验证要求
+
+实现后需要全量回归：`grade-fs`（bigfile + symlinktest + usertests）、`grade-mmap`、
+`grade-lock`，确认真正常提交路径和崩溃恢复路径均行为正确。
+
+## P9：CI 与发布流程
 
 - 默认 CI 只跑轻量或中等回归：
   - `make smoke`

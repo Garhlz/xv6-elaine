@@ -1,7 +1,6 @@
 //
-// File-system system calls.
-// Mostly argument checking, since we don't trust
-// user code, and calls into file.c and fs.c.
+// 文件系统系统调用 (file-system system calls)。
+// 主要做参数校验（不信任用户态代码），校验通过后调用 file.c 和 fs.c 中的底层函数。
 //
 
 #include "types.h"
@@ -17,427 +16,464 @@
 #include "file.h"
 #include "fcntl.h"
 
-// Fetch the nth word-sized system call argument as a file descriptor
-// and return both the descriptor and the corresponding struct file.
-static int argfd(int n, int *pfd, struct file **pf) {
+// 取第 arg_index 个系统调用参数作为文件描述符，返回描述符编号和对应的 `struct file` 指针。
+// out_fd / out_file 可以为 0，表示调用者只关心其中一项。
+static int argfd(int arg_index, int *out_fd, struct file **out_file) {
     int fd;
-    struct file *f;
+    struct file *file;
 
-    if (argint(n, &fd) < 0)
+    if (argint(arg_index, &fd) < 0)
         return -1;
-    if (fd < 0 || fd >= NOFILE || (f = myproc()->ofile[fd]) == 0)
+    if (fd < 0 || fd >= NOFILE || (file = myproc()->ofile[fd]) == 0)
         return -1;
-    if (pfd)
-        *pfd = fd;
-    if (pf)
-        *pf = f;
+    if (out_fd)
+        *out_fd = fd;
+    if (out_file)
+        *out_file = file;
     return 0;
 }
 
-// Allocate a file descriptor for the given file.
-// Takes over file reference from caller on success.
-static int fdalloc(struct file *f) {
-    int fd;
-    struct proc *p = myproc();
+// 为 file 分配一个空闲的文件描述符编号。
+// 成功时接管 file 的引用（将 file 指针存入 ofile[] 数组）。
+static int fdalloc(struct file *file) {
+    struct proc *proc = myproc();
 
-    for (fd = 0; fd < NOFILE; fd++) {
-        if (p->ofile[fd] == 0) {
-            p->ofile[fd] = f;
+    for (int fd = 0; fd < NOFILE; fd++) {
+        if (proc->ofile[fd] == 0) {
+            proc->ofile[fd] = file;
             return fd;
         }
     }
     return -1;
 }
 
+// dup(fd): 复制文件描述符，返回新 fd。
 uint64 sys_dup(void) {
-    struct file *f;
+    struct file *file;
     int fd;
 
-    if (argfd(0, 0, &f) < 0)
+    if (argfd(0, 0, &file) < 0)
         return -1;
-    if ((fd = fdalloc(f)) < 0)
+    if ((fd = fdalloc(file)) < 0)
         return -1;
-    filedup(f);
+    filedup(file); // 增加 file 引用计数
     return fd;
 }
 
+// read(fd, buf, n): 从文件描述符 fd 读取 n 字节到用户态缓冲区 buf。
 uint64 sys_read(void) {
-    struct file *f;
-    int n;
-    uint64 p;
+    struct file *file;
+    int nbytes;
+    uint64 buf_addr;
 
-    if (argfd(0, 0, &f) < 0 || argint(2, &n) < 0 || argaddr(1, &p) < 0)
+    if (argfd(0, 0, &file) < 0 || argint(2, &nbytes) < 0 || argaddr(1, &buf_addr) < 0)
         return -1;
-    return fileread(f, p, n);
+    return fileread(file, buf_addr, nbytes);
 }
 
+// write(fd, buf, n): 将用户态缓冲区 buf 中的 n 字节写入文件描述符 fd。
 uint64 sys_write(void) {
-    struct file *f;
-    int n;
-    uint64 p;
+    struct file *file;
+    int nbytes;
+    uint64 buf_addr;
 
-    if (argfd(0, 0, &f) < 0 || argint(2, &n) < 0 || argaddr(1, &p) < 0)
+    if (argfd(0, 0, &file) < 0 || argint(2, &nbytes) < 0 || argaddr(1, &buf_addr) < 0)
         return -1;
-
-    return filewrite(f, p, n);
+    return filewrite(file, buf_addr, nbytes);
 }
 
+// close(fd): 关闭文件描述符 fd。
 uint64 sys_close(void) {
     int fd;
-    struct file *f;
+    struct file *file;
 
-    if (argfd(0, &fd, &f) < 0)
+    if (argfd(0, &fd, &file) < 0)
         return -1;
     myproc()->ofile[fd] = 0;
-    fileclose(f);
+    fileclose(file); // fileclose 负责清理引用和释放资源
     return 0;
 }
 
+// fstat(fd, st): 将文件描述符 fd 对应的文件元数据写入用户态 stat 结构体。
 uint64 sys_fstat(void) {
-    struct file *f;
-    uint64 st; // user pointer to struct stat
+    struct file *file;
+    uint64 stat_addr; // 用户态 struct stat 指针
 
-    if (argfd(0, 0, &f) < 0 || argaddr(1, &st) < 0)
+    if (argfd(0, 0, &file) < 0 || argaddr(1, &stat_addr) < 0)
         return -1;
-    return filestat(f, st);
+    return filestat(file, stat_addr);
 }
 
-// Create the path new as a link to the same inode as old.
+// 创建硬链接 link(old, new): 让 new 指向 old 的同一个 inode。
 uint64 sys_link(void) {
-    char name[DIRSIZ], new[MAXPATH], old[MAXPATH];
-    struct inode *dp, *ip;
+    char name[DIRSIZ], new_path[MAXPATH], old_path[MAXPATH];
+    struct inode *inode, *parent_dir;
 
-    if (argstr(0, old, MAXPATH) < 0 || argstr(1, new, MAXPATH) < 0)
+    if (argstr(0, old_path, MAXPATH) < 0 || argstr(1, new_path, MAXPATH) < 0)
         return -1;
 
     begin_op();
-    if ((ip = namei(old)) == 0) {
+    if ((inode = namei(old_path)) == 0) {
         end_op();
         return -1;
     }
 
-    ilock(ip);
-    if (ip->type == T_DIR) {
-        iunlockput(ip);
+    ilock(inode);
+    if (inode->type == T_DIR) {
+        // 不允许对目录创建硬链接（避免产生目录环）
+        iunlockput(inode);
         end_op();
         return -1;
     }
 
-    ip->nlink++;
-    iupdate(ip);
-    iunlock(ip);
+    inode->nlink++;
+    iupdate(inode);
+    iunlock(inode);
 
-    if ((dp = nameiparent(new, name)) == 0)
+    // 获取 new_path 的父目录和最终文件名
+    if ((parent_dir = nameiparent(new_path, name)) == 0)
         goto bad;
-    ilock(dp);
-    if (dp->dev != ip->dev || dirlink(dp, name, ip->inum) < 0) {
-        iunlockput(dp);
+    ilock(parent_dir);
+    if (parent_dir->dev != inode->dev || dirlink(parent_dir, name, inode->inum) < 0) {
+        iunlockput(parent_dir);
         goto bad;
     }
-    iunlockput(dp);
-    iput(ip);
+    iunlockput(parent_dir);
+    iput(inode);
 
     end_op();
-
     return 0;
 
 bad:
-    ilock(ip);
-    ip->nlink--;
-    iupdate(ip);
-    iunlockput(ip);
+    // 回滚: 恢复 inode 的 nlink
+    ilock(inode);
+    inode->nlink--;
+    iupdate(inode);
+    iunlockput(inode);
     end_op();
     return -1;
 }
 
-// Is the directory dp empty except for "." and ".." ?
-static int isdirempty(struct inode *dp) {
-    int off;
-    struct dirent de;
+// 检查目录 dir 是否为空（只有 "." 和 ".."）。
+// 从第 3 个 dirent（偏移 2*sizeof(dirent)）开始扫描，因为前两个一定是 "." 和 ".."。
+static int isdirempty(struct inode *dir) {
+    uint entry_size = sizeof(struct dirent);
+    struct dirent entry;
 
-    for (off = 2 * sizeof(de); off < dp->size; off += sizeof(de)) {
-        if (readi(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
+    for (uint offset = 2 * entry_size; offset < dir->size; offset += entry_size) {
+        if (readi(dir, 0, (uint64)&entry, offset, entry_size) != entry_size)
             panic("isdirempty: readi");
-        if (de.inum != 0)
+        if (entry.inum != 0) // 找到非空闲条目 → 目录非空
             return 0;
     }
     return 1;
 }
 
+// unlink(path): 删除路径 path 指向的文件/目录的目录项。
 uint64 sys_unlink(void) {
-    struct inode *ip, *dp;
-    struct dirent de;
+    struct inode *inode, *parent_dir;
+    struct dirent entry;
     char name[DIRSIZ], path[MAXPATH];
-    uint off;
+    uint entry_offset;
 
     if (argstr(0, path, MAXPATH) < 0)
         return -1;
 
     begin_op();
-    if ((dp = nameiparent(path, name)) == 0) {
+    if ((parent_dir = nameiparent(path, name)) == 0) {
         end_op();
         return -1;
     }
 
-    ilock(dp);
+    ilock(parent_dir);
 
-    // Cannot unlink "." or "..".
+    // 不允许删除 "." 或 ".."
     if (namecmp(name, ".") == 0 || namecmp(name, "..") == 0)
         goto bad;
 
-    if ((ip = dirlookup(dp, name, &off)) == 0)
+    if ((inode = dirlookup(parent_dir, name, &entry_offset)) == 0)
         goto bad;
-    ilock(ip);
+    ilock(inode);
 
-    if (ip->nlink < 1)
+    if (inode->nlink < 1)
         panic("unlink: nlink < 1");
-    if (ip->type == T_DIR && !isdirempty(ip)) {
-        iunlockput(ip);
+    // 不允许删除非空目录
+    if (inode->type == T_DIR && !isdirempty(inode)) {
+        iunlockput(inode);
         goto bad;
     }
 
-    memset(&de, 0, sizeof(de));
-    if (writei(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
+    // 将父目录中的 dirent 清零（标记为删除）
+    memset(&entry, 0, sizeof(entry));
+    if (writei(parent_dir, 0, (uint64)&entry, entry_offset, sizeof(entry)) != sizeof(entry))
         panic("unlink: writei");
-    if (ip->type == T_DIR) {
-        dp->nlink--;
-        iupdate(dp);
+    // 目录的 nlink 包含了 ".." 条目——删除子目录时递减父目录的链接数
+    if (inode->type == T_DIR) {
+        parent_dir->nlink--;
+        iupdate(parent_dir);
     }
-    iunlockput(dp);
+    iunlockput(parent_dir);
 
-    ip->nlink--;
-    iupdate(ip);
-    iunlockput(ip);
+    inode->nlink--;
+    iupdate(inode);
+    iunlockput(inode);
 
     end_op();
-
     return 0;
 
 bad:
-    iunlockput(dp);
+    iunlockput(parent_dir);
     end_op();
     return -1;
 }
 
+// 在路径 path 处创建一个类型为 type 的新 inode。
+// 如果路径已存在且 type==T_FILE，则返回已有 inode（用于 open(O_CREATE) 的语义）。
+// major/minor 仅对 T_DEVICE 类型有意义。
 static struct inode *create(char *path, short type, short major, short minor) {
-    struct inode *ip, *dp;
+    struct inode *inode, *parent_dir;
     char name[DIRSIZ];
 
-    if ((dp = nameiparent(path, name)) == 0)
+    if ((parent_dir = nameiparent(path, name)) == 0)
         return 0;
 
-    ilock(dp);
+    ilock(parent_dir);
 
-    if ((ip = dirlookup(dp, name, 0)) != 0) {
-        iunlockput(dp);
-        ilock(ip);
-        if (type == T_FILE && (ip->type == T_FILE || ip->type == T_DEVICE))
-            return ip;
-        iunlockput(ip);
+    // 路径已存在？若 type==T_FILE 且已有文件为 T_FILE/T_DEVICE，直接返回
+    if ((inode = dirlookup(parent_dir, name, 0)) != 0) {
+        iunlockput(parent_dir);
+        ilock(inode);
+        if (type == T_FILE && (inode->type == T_FILE || inode->type == T_DEVICE))
+            return inode;
+        iunlockput(inode);
         return 0;
     }
 
-    if ((ip = ialloc(dp->dev, type)) == 0)
+    // 分配新 inode
+    if ((inode = ialloc(parent_dir->dev, type)) == 0)
         panic("create: ialloc");
 
-    ilock(ip);
-    ip->major = major;
-    ip->minor = minor;
-    ip->nlink = 1;
-    iupdate(ip);
+    ilock(inode);
+    inode->major = major;
+    inode->minor = minor;
+    inode->nlink = 1;
+    iupdate(inode);
 
-    if (type == T_DIR) { // Create . and .. entries.
-        dp->nlink++;     // for ".."
-        iupdate(dp);
-        // No ip->nlink++ for ".": avoid cyclic ref count.
-        if (dirlink(ip, ".", ip->inum) < 0 || dirlink(ip, "..", dp->inum) < 0)
+    // 目录需要初始化 "." 和 ".." 两个条目
+    if (type == T_DIR) {
+        parent_dir->nlink++; // 新建的子目录中 ".." 指向父目录，父目录 nlink+1
+        iupdate(parent_dir);
+        // 注意: inode->nlink 不因 "." 递增——避免循环引用计数
+        if (dirlink(inode, ".", inode->inum) < 0 || dirlink(inode, "..", parent_dir->inum) < 0)
             panic("create dots");
     }
 
-    if (dirlink(dp, name, ip->inum) < 0)
+    // 在父目录中添加新目录项
+    if (dirlink(parent_dir, name, inode->inum) < 0)
         panic("create: dirlink");
 
-    iunlockput(dp);
-
-    return ip;
+    iunlockput(parent_dir);
+    return inode;
 }
 
+// 打开路径 path，跟随符号链接（最多 10 层）。
+// omode 中含 O_NOFOLLOW 时，不跟随符号链接，直接返回符号链接自身的 inode。
 static struct inode *open_path(char *path, int omode) {
-    char next[MAXPATH];
-    struct inode *ip;
-    int depth;
-    int n;
+    char target[MAXPATH];
+    struct inode *inode;
 
-    if ((ip = namei(path)) == 0)
+    if ((inode = namei(path)) == 0)
         return 0;
 
+    // O_NOFOLLOW: 不跟随符号链接
     if (omode & O_NOFOLLOW) {
-        ilock(ip);
-        return ip;
+        ilock(inode);
+        return inode;
     }
 
-    for (depth = 0; depth < 10; depth++) {
-        ilock(ip);
-        if (ip->type != T_SYMLINK)
-            return ip;
+    // 逐层跟随符号链接，最多 10 层（防止环路）
+    for (int depth = 0; depth < 10; depth++) {
+        ilock(inode);
+        if (inode->type != T_SYMLINK)
+            return inode; // 不是符号链接，直接返回
 
-        n = readi(ip, 0, (uint64)next, 0, ip->size);
-        if (n != ip->size || n >= MAXPATH) {
-            iunlockput(ip);
+        // 读取符号链接指向的目标路径
+        int nbytes = readi(inode, 0, (uint64)target, 0, inode->size);
+        if (nbytes != inode->size || nbytes >= MAXPATH) {
+            iunlockput(inode);
             return 0;
         }
-        next[n] = '\0';
-        iunlockput(ip);
+        target[nbytes] = '\0';
+        iunlockput(inode);
 
-        if ((ip = namei(next)) == 0)
+        // 解析目标路径
+        if ((inode = namei(target)) == 0)
             return 0;
     }
 
-    iput(ip);
+    // 超过最大层数
+    iput(inode);
     return 0;
 }
 
+// open(path, flags): 打开（或创建）文件，返回文件描述符。
 uint64 sys_open(void) {
     char path[MAXPATH];
     int fd, omode;
-    struct file *f;
-    struct inode *ip;
-    int n;
+    struct file *file;
+    struct inode *inode;
 
-    if ((n = argstr(0, path, MAXPATH)) < 0 || argint(1, &omode) < 0)
+    if (argstr(0, path, MAXPATH) < 0 || argint(1, &omode) < 0)
         return -1;
 
     begin_op();
 
     if (omode & O_CREATE) {
-        ip = create(path, T_FILE, 0, 0);
-        if (ip == 0) {
+        // O_CREATE: 文件不存在则创建
+        inode = create(path, T_FILE, 0, 0);
+        if (inode == 0) {
             end_op();
             return -1;
         }
     } else {
-        if ((ip = open_path(path, omode)) == 0) {
+        // 普通打开: 跟随符号链接
+        inode = open_path(path, omode);
+        if (inode == 0) {
             end_op();
             return -1;
         }
-        if (ip->type == T_DIR && omode != O_RDONLY) {
-            iunlockput(ip);
+        // 不允许以写入模式打开目录
+        if (inode->type == T_DIR && omode != O_RDONLY) {
+            iunlockput(inode);
             end_op();
             return -1;
         }
     }
 
-    if (ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)) {
-        iunlockput(ip);
+    // 校验设备号范围
+    if (inode->type == T_DEVICE && (inode->major < 0 || inode->major >= NDEV)) {
+        iunlockput(inode);
         end_op();
         return -1;
     }
 
-    if ((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0) {
-        if (f)
-            fileclose(f);
-        iunlockput(ip);
+    // 分配 file 结构和 fd 编号
+    if ((file = filealloc()) == 0 || (fd = fdalloc(file)) < 0) {
+        if (file)
+            fileclose(file);
+        iunlockput(inode);
         end_op();
         return -1;
     }
 
-    if (ip->type == T_DEVICE) {
-        f->type = FD_DEVICE;
-        f->major = ip->major;
+    // 填充 file 结构
+    if (inode->type == T_DEVICE) {
+        file->type = FD_DEVICE;
+        file->major = inode->major;
     } else {
-        f->type = FD_INODE;
-        f->off = 0;
+        file->type = FD_INODE;
+        file->off = 0; // 普通文件从偏移 0 开始
     }
-    f->ip = ip;
-    f->readable = !(omode & O_WRONLY);
-    f->writable = (omode & O_WRONLY) || (omode & O_RDWR);
+    file->ip = inode;
+    file->readable = !(omode & O_WRONLY);
+    file->writable = (omode & O_WRONLY) || (omode & O_RDWR);
 
-    if ((omode & O_TRUNC) && ip->type == T_FILE) {
-        itrunc(ip);
-    }
+    // O_TRUNC: 截断文件（仅在普通文件有效）
+    if ((omode & O_TRUNC) && inode->type == T_FILE)
+        itrunc(inode);
 
-    iunlock(ip);
+    iunlock(inode);
     end_op();
 
     return fd;
 }
 
+// symlink(target, path): 在 path 处创建一个指向 target 的符号链接。
+// 符号链接本身是一个 type==T_SYMLINK 的 inode，其数据内容为目标路径字符串。
 uint64 sys_symlink(void) {
     char target[MAXPATH], path[MAXPATH];
-    struct inode *ip;
-    int n;
+    struct inode *inode;
 
-    if ((n = argstr(0, target, MAXPATH)) < 0 || argstr(1, path, MAXPATH) < 0)
+    int nbytes = argstr(0, target, MAXPATH);
+    if (nbytes < 0 || argstr(1, path, MAXPATH) < 0)
         return -1;
 
     begin_op();
-    if ((ip = create(path, T_SYMLINK, 0, 0)) == 0) {
+    if ((inode = create(path, T_SYMLINK, 0, 0)) == 0) {
         end_op();
         return -1;
     }
 
-    if (writei(ip, 0, (uint64)target, 0, n) != n) {
-        iunlockput(ip);
+    // 将目标路径字符串写入符号链接 inode 的数据区
+    if (writei(inode, 0, (uint64)target, 0, nbytes) != nbytes) {
+        iunlockput(inode);
         end_op();
         return -1;
     }
 
-    iunlockput(ip);
+    iunlockput(inode);
     end_op();
     return 0;
 }
 
+// mmap(addr, length, prot, flags, fd, offset): 将文件映射到进程地址空间。
 uint64 sys_mmap(void) {
     uint64 addr, length, offset;
     int prot, flags, fd;
-    struct file *f;
-    struct proc *p = myproc();
+    struct file *file;
+    struct proc *proc = myproc();
     struct vma *vma = 0;
-    uint64 rounded;
+    uint64 rounded_len;
 
     if (argaddr(0, &addr) < 0 || argaddr(1, &length) < 0 || argint(2, &prot) < 0 ||
         argint(3, &flags) < 0 || argint(4, &fd) < 0 || argaddr(5, &offset) < 0) {
         return -1;
     }
 
-    if (length == 0 || fd < 0 || fd >= NOFILE || (f = p->ofile[fd]) == 0)
+    // 校验 fd 有效性
+    if (length == 0 || fd < 0 || fd >= NOFILE || (file = proc->ofile[fd]) == 0)
         return -1;
-    if (f->type != FD_INODE)
+    if (file->type != FD_INODE)
         return -1;
+    // 校验 flags 和 prot 的合法性
     if ((flags & (MAP_SHARED | MAP_PRIVATE)) == 0)
         return -1;
     if ((flags & MAP_SHARED) && (flags & MAP_PRIVATE))
         return -1;
-    if ((prot & PROT_READ) && !f->readable)
+    if ((prot & PROT_READ) && !file->readable)
         return -1;
-    if ((flags & MAP_SHARED) && (prot & PROT_WRITE) && !f->writable)
-        return -1;
-
-    rounded = PGROUNDUP(length);
-    if (p->mmap_top + rounded < p->mmap_top || p->mmap_top + rounded >= TRAPFRAME)
+    if ((flags & MAP_SHARED) && (prot & PROT_WRITE) && !file->writable)
         return -1;
 
+    // 长度向上对齐到页边界
+    rounded_len = PGROUNDUP(length);
+    if (proc->mmap_top + rounded_len < proc->mmap_top || proc->mmap_top + rounded_len >= TRAPFRAME)
+        return -1;
+
+    // 找到空闲 VMA 槽位
     for (int i = 0; i < NVMA; i++) {
-        if (!p->vmas[i].valid) {
-            vma = &p->vmas[i];
+        if (!proc->vmas[i].valid) {
+            vma = &proc->vmas[i];
             break;
         }
     }
     if (vma == 0)
         return -1;
 
-    vma->addr = p->mmap_top;
-    vma->length = rounded;
+    // 填充 VMA 元数据
+    vma->addr = proc->mmap_top;
+    vma->length = rounded_len;
     vma->offset = offset;
     vma->prot = prot;
     vma->flags = flags;
-    vma->file = filedup(f);
+    vma->file = filedup(file); // filedup 增加 file 引用计数
     vma->valid = 1;
-    p->mmap_top += rounded;
+    proc->mmap_top += rounded_len;
 
     return vma->addr;
 }
 
+// munmap(addr, length): 取消内存映射。
 uint64 sys_munmap(void) {
     uint64 addr, length;
 
@@ -446,79 +482,83 @@ uint64 sys_munmap(void) {
     return mmap_unmap(myproc(), addr, length);
 }
 
+// mkdir(path): 创建目录。
 uint64 sys_mkdir(void) {
     char path[MAXPATH];
-    struct inode *ip;
+    struct inode *inode;
 
     begin_op();
-    if (argstr(0, path, MAXPATH) < 0 || (ip = create(path, T_DIR, 0, 0)) == 0) {
+    if (argstr(0, path, MAXPATH) < 0 || (inode = create(path, T_DIR, 0, 0)) == 0) {
         end_op();
         return -1;
     }
-    iunlockput(ip);
+    iunlockput(inode);
     end_op();
     return 0;
 }
 
+// mknod(path, major, minor): 创建设备文件。
 uint64 sys_mknod(void) {
-    struct inode *ip;
+    struct inode *inode;
     char path[MAXPATH];
     int major, minor;
 
     begin_op();
-    if ((argstr(0, path, MAXPATH)) < 0 || argint(1, &major) < 0 || argint(2, &minor) < 0 ||
-        (ip = create(path, T_DEVICE, major, minor)) == 0) {
+    if (argstr(0, path, MAXPATH) < 0 || argint(1, &major) < 0 || argint(2, &minor) < 0 ||
+        (inode = create(path, T_DEVICE, major, minor)) == 0) {
         end_op();
         return -1;
     }
-    iunlockput(ip);
+    iunlockput(inode);
     end_op();
     return 0;
 }
 
+// chdir(path): 切换当前工作目录。
 uint64 sys_chdir(void) {
     char path[MAXPATH];
-    struct inode *ip;
-    struct proc *p = myproc();
+    struct inode *inode;
+    struct proc *proc = myproc();
 
     begin_op();
-    if (argstr(0, path, MAXPATH) < 0 || (ip = namei(path)) == 0) {
+    if (argstr(0, path, MAXPATH) < 0 || (inode = namei(path)) == 0) {
         end_op();
         return -1;
     }
-    ilock(ip);
-    if (ip->type != T_DIR) {
-        iunlockput(ip);
+    ilock(inode);
+    if (inode->type != T_DIR) {
+        iunlockput(inode);
         end_op();
         return -1;
     }
-    iunlock(ip);
-    iput(p->cwd);
+    iunlock(inode);
+    iput(proc->cwd); // 释放旧 cwd 的引用
     end_op();
-    p->cwd = ip;
+    proc->cwd = inode; // 设置新 cwd（已通过 namei 获得引用）
     return 0;
 }
 
+// exec(path, argv): 加载并执行新程序。
 uint64 sys_exec(void) {
     char path[MAXPATH], *argv[MAXARG];
-    int i;
     uint64 uargv, uarg;
 
-    if (argstr(0, path, MAXPATH) < 0 || argaddr(1, &uargv) < 0) {
+    if (argstr(0, path, MAXPATH) < 0 || argaddr(1, &uargv) < 0)
         return -1;
-    }
+
+    // 从用户态拷贝 argv 数组到内核
     memset(argv, 0, sizeof(argv));
-    for (i = 0;; i++) {
-        if (i >= NELEM(argv)) {
+    for (int i = 0;; i++) {
+        if (i >= NELEM(argv))
             goto bad;
-        }
-        if (fetchaddr(uargv + sizeof(uint64) * i, (uint64 *)&uarg) < 0) {
+        // 读取用户态 argv[i] 的指针值
+        if (fetchaddr(uargv + sizeof(uint64) * i, (uint64 *)&uarg) < 0)
             goto bad;
-        }
         if (uarg == 0) {
             argv[i] = 0;
-            break;
+            break; // argv 数组以 NULL 结尾
         }
+        // 分配内核页面，将用户态字符串拷入
         argv[i] = kalloc();
         if (argv[i] == 0)
             goto bad;
@@ -528,64 +568,68 @@ uint64 sys_exec(void) {
 
     int ret = exec(path, argv);
 
-    for (i = 0; i < NELEM(argv) && argv[i] != 0; i++)
+    // 释放 argv 中分配的内核页面
+    for (int i = 0; i < NELEM(argv) && argv[i] != 0; i++)
         kfree(argv[i]);
-
     return ret;
 
 bad:
-    for (i = 0; i < NELEM(argv) && argv[i] != 0; i++)
+    for (int i = 0; i < NELEM(argv) && argv[i] != 0; i++)
         kfree(argv[i]);
     return -1;
 }
 
+// pipe(fdarray): 创建管道，将读写两端的 fd 写入用户态数组 fdarray[2]。
 uint64 sys_pipe(void) {
-    uint64 fdarray; // user pointer to array of two integers
-    struct file *rf, *wf;
-    int fd0, fd1;
-    struct proc *p = myproc();
+    uint64 fdarray_addr; // 用户态 int[2] 数组地址
+    struct file *read_file, *write_file;
+    int fd_read, fd_write;
+    struct proc *proc = myproc();
 
-    if (argaddr(0, &fdarray) < 0)
+    if (argaddr(0, &fdarray_addr) < 0)
         return -1;
-    if (pipealloc(&rf, &wf) < 0)
+    if (pipealloc(&read_file, &write_file) < 0)
         return -1;
-    fd0 = -1;
-    if ((fd0 = fdalloc(rf)) < 0 || (fd1 = fdalloc(wf)) < 0) {
-        if (fd0 >= 0)
-            p->ofile[fd0] = 0;
-        fileclose(rf);
-        fileclose(wf);
+
+    fd_read = -1;
+    if ((fd_read = fdalloc(read_file)) < 0 || (fd_write = fdalloc(write_file)) < 0) {
+        // 分配 fd 失败——回滚
+        if (fd_read >= 0)
+            proc->ofile[fd_read] = 0;
+        fileclose(read_file);
+        fileclose(write_file);
         return -1;
     }
-    if (copyout(p->pagetable, fdarray, (char *)&fd0, sizeof(fd0)) < 0 ||
-        copyout(p->pagetable, fdarray + sizeof(fd0), (char *)&fd1, sizeof(fd1)) < 0) {
-        p->ofile[fd0] = 0;
-        p->ofile[fd1] = 0;
-        fileclose(rf);
-        fileclose(wf);
+
+    // 将两个 fd 编号写回用户态 fdarray[0..1]
+    if (copyout(proc->pagetable, fdarray_addr, (char *)&fd_read, sizeof(fd_read)) < 0 ||
+        copyout(proc->pagetable, fdarray_addr + sizeof(fd_read), (char *)&fd_write,
+                sizeof(fd_write)) < 0) {
+        proc->ofile[fd_read] = 0;
+        proc->ofile[fd_write] = 0;
+        fileclose(read_file);
+        fileclose(write_file);
         return -1;
     }
     return 0;
 }
 
+// connect(raddr, lport, rport): 创建 UDP socket（net lab）。
 int sys_connect(void) {
-    struct file *f;
-    int fd;
-    uint32 raddr;
-    uint32 rport;
-    uint32 lport;
+    struct file *file;
+    uint32 raddr, lport, rport;
 
     if (argint(0, (int *)&raddr) < 0 || argint(1, (int *)&lport) < 0 ||
         argint(2, (int *)&rport) < 0) {
         return -1;
     }
 
-    if (sockalloc(&f, raddr, lport, rport) < 0)
+    if (sockalloc(&file, raddr, lport, rport) < 0)
         return -1;
-    if ((fd = fdalloc(f)) < 0) {
-        fileclose(f);
+    int fd = fdalloc(file);
+    if (fd < 0) {
+        fileclose(file);
         return -1;
     }
-
     return fd;
 }
