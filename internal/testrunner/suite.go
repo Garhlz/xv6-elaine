@@ -1,0 +1,269 @@
+package testrunner
+
+import "time"
+
+// Suite 是一组按子系统或用途归类的测试用例集合。
+type Suite struct {
+	Name  string
+	Cases []Case
+}
+
+// Case 描述一个可独立执行的测试用例。
+//
+// 字段:
+//   Commands   — 在 xv6 shell 中顺序执行的命令列表
+//   Background — 在 QEMU 启动前必须先启动的后台进程（如 make server）
+//   Expect     — 必须在输出中出现的 regex 模式列表
+//   Count      — 输出中某 regex 必须出现的次数约束
+//   Reject     — 不允许在输出中出现的 regex 模式列表
+//   Tags       — 分类标签，如 "util", "syscall", "smoke", "heavy"
+//   Heavy      — 是否属于重型测试（默认不跑）
+//   Artifacts  — 失败时额外保存的文件路径（相对于仓库根目录）
+//
+// 未实现的模型字段（待后续 Phase 补充）:
+//   HostOnly   — 是否仅在宿主机运行（不需 QEMU），用于 notxv6/ph 等
+type Case struct {
+	Name       string
+	Commands   []string
+	Background [][]string
+	Expect     []string
+	Count      []CountExpectation
+	Reject     []string
+	Tags       []string
+	Heavy      bool
+	Artifacts  []string
+	Timeout    time.Duration
+}
+
+// CountExpectation 描述某 regex 模式在输出中应出现的次数。
+// Exact > 0 时要求精确匹配；Min > 0 时要求至少出现 Min 次。
+type CountExpectation struct {
+	Pattern string
+	Exact   int
+	Min     int
+}
+
+// BuiltinSuites 返回所有内置测试套件。
+func BuiltinSuites() map[string]Suite {
+	smoke := Suite{
+		Name: "smoke",
+		Cases: []Case{
+			{
+				Name:     "sleep-returns",
+				Commands: []string{"sleep", "echo OK"},
+				Expect:   []string{`(?m)^OK$`},
+				Reject:   commonRejects(),
+				Tags:     []string{"util", "smoke"},
+				Timeout:  30 * time.Second,
+			},
+			{
+				Name:     "pingpong",
+				Commands: []string{"pingpong", "echo OK"},
+				Expect: []string{
+					`(?m)^\d+: received ping$`,
+					`(?m)^\d+: received pong$`,
+					`(?m)^OK$`,
+				},
+				Reject:  commonRejects(),
+				Tags:    []string{"util", "smoke"},
+				Timeout: 30 * time.Second,
+			},
+			{
+				Name:     "primes",
+				Commands: []string{"primes", "echo OK"},
+				Expect: []string{
+					`(?m)^prime 2$`, `(?m)^prime 3$`, `(?m)^prime 5$`,
+					`(?m)^prime 7$`, `(?m)^prime 11$`, `(?m)^prime 13$`,
+					`(?m)^prime 17$`, `(?m)^prime 19$`, `(?m)^prime 23$`,
+					`(?m)^prime 29$`, `(?m)^prime 31$`, `(?m)^OK$`,
+				},
+				Reject:  commonRejects(),
+				Tags:    []string{"util", "smoke"},
+				Timeout: 30 * time.Second,
+			},
+			{
+				Name: "find-current-directory",
+				Commands: []string{
+					"echo > go_find_cur",
+					"find . go_find_cur",
+				},
+				Expect:  []string{`(?m)^\./go_find_cur$`},
+				Reject:  commonRejects(),
+				Tags:    []string{"util", "smoke"},
+				Timeout: 30 * time.Second,
+			},
+			{
+				Name: "find-recursive",
+				Commands: []string{
+					"mkdir go_find_dir",
+					"echo > go_find_dir/go_find_rec",
+					"mkdir go_find_dir/go_find_nest",
+					"echo > go_find_dir/go_find_nest/go_find_rec",
+					"find . go_find_rec",
+				},
+				Expect: []string{
+					`(?m)^\./go_find_dir/go_find_rec$`,
+					`(?m)^\./go_find_dir/go_find_nest/go_find_rec$`,
+				},
+				Reject:  commonRejects(),
+				Tags:    []string{"util", "smoke"},
+				Timeout: 30 * time.Second,
+			},
+			{
+				Name:     "xargs",
+				Commands: []string{"sh < xargstest.sh", "echo DONE"},
+				Expect:   []string{`(?m)^(?:\$ )*DONE$`},
+				Count:    []CountExpectation{{Pattern: `(?m)^(?:\$ )*hello$`, Exact: 3}},
+				Reject:   commonRejects(),
+				Tags:     []string{"util", "smoke"},
+				Timeout:  30 * time.Second,
+			},
+			{
+				Name:     "trace-32-grep",
+				Commands: []string{"trace 32 grep hello README"},
+				Expect: []string{
+					`(?m)^\d+: syscall read -> 1023$`,
+					`(?m)^\d+: syscall read -> 968$`,
+					`(?m)^\d+: syscall read -> 235$`,
+					`(?m)^\d+: syscall read -> 0$`,
+				},
+				Reject:  commonRejects(),
+				Tags:    []string{"syscall", "smoke"},
+				Timeout: 30 * time.Second,
+			},
+			{
+				Name:     "trace-all-grep",
+				Commands: []string{"trace 2147483647 grep hello README"},
+				Expect: []string{
+					`(?m)^\d+: syscall trace -> 0$`,
+					`(?m)^\d+: syscall exec -> 3$`,
+					`(?m)^\d+: syscall open -> 3$`,
+					`(?m)^\d+: syscall read -> 1023$`,
+					`(?m)^\d+: syscall read -> 968$`,
+					`(?m)^\d+: syscall read -> 235$`,
+					`(?m)^\d+: syscall read -> 0$`,
+					`(?m)^\d+: syscall close -> 0$`,
+				},
+				Reject:  commonRejects(),
+				Tags:    []string{"syscall", "smoke"},
+				Timeout: 30 * time.Second,
+			},
+			{
+				Name:     "trace-nothing",
+				Commands: []string{"grep hello README", "echo OK"},
+				Expect:   []string{`(?m)^OK$`},
+				Reject:   append(commonRejects(), `(?m)^.* syscall .*$`),
+				Tags:     []string{"syscall", "smoke"},
+				Timeout:  30 * time.Second,
+			},
+			{
+				Name:     "trace-children",
+				Commands: []string{"trace 2 usertests forkforkfork"},
+				Expect:   []string{`(?m)^ALL TESTS PASSED$`},
+				Count:    []CountExpectation{{Pattern: `(?m)^\d+: syscall fork -> -?\d+$`, Min: 8}},
+				Reject:   commonRejects(),
+				Tags:     []string{"syscall", "smoke"},
+				Timeout:  60 * time.Second,
+			},
+			{
+				Name:     "sysinfotest",
+				Commands: []string{"sysinfotest"},
+				Expect:   []string{`(?m)^sysinfotest: OK$`},
+				Reject:   append(commonRejects(), `(?m)^.* FAIL .*$`),
+				Tags:     []string{"syscall", "smoke"},
+				Timeout:  30 * time.Second,
+			},
+			{
+				Name:     "pgtbltest",
+				Commands: []string{"pgtbltest"},
+				Expect: []string{
+					`(?m)^ugetpid_test: OK$`,
+					`(?m)^pgaccess_test: OK$`,
+					`(?m)^pgtbltest: all tests succeeded$`,
+				},
+				Reject:  append(commonRejects(), `(?m)^pgtbltest: .* failed:`),
+				Tags:    []string{"pgtbl", "smoke"},
+				Timeout: 300 * time.Second,
+			},
+			{
+				Name:     "pte-printout",
+				Commands: []string{"echo hi"},
+				Expect: []string{
+					`(?m)^hi$`,
+					`(?m)^page table 0x000000008[0-9a-f]+$`,
+					`(?m)^\.\.0: pte 0x[0-9a-f]+ pa 0x000000008[0-9a-f]+$`,
+					`(?m)^\.\. \.\. \.\.0: pte 0x[0-9a-f]+ pa 0x000000008[0-9a-f]+$`,
+				},
+				Reject:  commonRejects(),
+				Tags:    []string{"pgtbl", "smoke"},
+				Timeout: 30 * time.Second,
+			},
+			{
+				Name:     "bttest",
+				Commands: []string{"bttest", "echo OK"},
+				Expect:   []string{`(?m)^OK$`},
+				Reject:   commonRejects(),
+				Tags:     []string{"traps", "smoke"},
+				Timeout:  30 * time.Second,
+			},
+			{
+				Name:     "alarmtest",
+				Commands: []string{"alarmtest"},
+				Expect: []string{
+					`(?m)^test0 passed$`,
+					`(?m)^\.*test1 passed$`,
+					`(?m)^\.*test2 passed$`,
+				},
+				Reject:  append(commonRejects(), `(?m)^.* failed.*$`),
+				Tags:    []string{"traps", "smoke"},
+				Timeout: 60 * time.Second,
+			},
+			{
+				Name:     "nettests",
+				Commands: []string{"nettests"},
+				Background: [][]string{
+					{"make", "server"},
+				},
+				Expect: []string{
+					`(?m)^testing ping: OK$`,
+					`(?m)^testing single-process pings: OK$`,
+					`(?m)^testing multi-process pings: OK$`,
+					`(?m)^DNS OK$`,
+				},
+				Reject:  commonRejects(),
+				Tags:    []string{"net", "smoke"},
+				Timeout: 30 * time.Second,
+			},
+			{
+				Name:     "symlinktest",
+				Commands: []string{"symlinktest"},
+				Expect: []string{
+					`(?m)^test symlinks: ok$`,
+					`(?m)^test concurrent symlinks: ok$`,
+				},
+				Reject:  commonRejects(),
+				Tags:    []string{"fs", "smoke"},
+				Timeout: 30 * time.Second,
+			},
+			{
+				Name:     "mmaptest",
+				Commands: []string{"mmaptest"},
+				Expect:   []string{`(?m)^mmaptest: all tests succeeded$`},
+				Reject:   append(commonRejects(), `(?m)^mmaptest: .* failed`),
+				Tags:     []string{"mmap", "smoke"},
+				Timeout:  60 * time.Second,
+			},
+		},
+	}
+
+	return map[string]Suite{
+		smoke.Name: smoke,
+	}
+}
+
+func commonRejects() []string {
+	return []string{
+		`(?m)^panic:`,
+		`(?m)^exec .* failed`,
+	}
+}

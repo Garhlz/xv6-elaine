@@ -82,6 +82,7 @@ TOOLPREFIX := $(shell if riscv64-unknown-elf-objdump -i 2>&1 | grep 'elf64-big' 
 endif
 
 QEMU = qemu-system-riscv64
+XV6TEST = GOCACHE=$(CURDIR)/$(BUILD)/go-cache go run ./cmd/xv6test
 
 CC = $(TOOLPREFIX)gcc
 AS = $(TOOLPREFIX)gas
@@ -345,6 +346,30 @@ smoke: $(KERNEL) image
 	python3 -c 'import types, gradelib; from gradelib import *; gradelib.options = types.SimpleNamespace(verbose=False, no_make=True, color="never"); r = Runner(); r.run_qemu(shell_script(["symlinktest"]), timeout=30); r.match("^test symlinks: ok$$"); r.match("^test concurrent symlinks: ok$$"); print("fs symlink smoke: OK")'
 	python3 -c 'import types, gradelib; from gradelib import *; gradelib.options = types.SimpleNamespace(verbose=False, no_make=True, color="never"); r = Runner(); r.run_qemu(shell_script(["mmaptest"]), timeout=60); r.match("^mmaptest: all tests succeeded$$"); print("mmap smoke: OK")'
 
+test-smoke-go: $(KERNEL) image
+	$(XV6TEST) run --suite smoke
+
+test-smoke-util: $(KERNEL) image
+	$(XV6TEST) run --suite smoke --tags util
+
+test-smoke-syscall: $(KERNEL) image
+	$(XV6TEST) run --suite smoke --tags syscall
+
+test-smoke-pgtbl: $(KERNEL) image
+	$(XV6TEST) run --suite smoke --tags pgtbl
+
+test-smoke-traps: $(KERNEL) image
+	$(XV6TEST) run --suite smoke --tags traps
+
+test-smoke-net: $(KERNEL) image
+	$(XV6TEST) run --suite smoke --tags net
+
+test-smoke-fs: $(KERNEL) image
+	$(XV6TEST) run --suite smoke --tags fs
+
+test-smoke-mmap: $(KERNEL) image
+	$(XV6TEST) run --suite smoke --tags mmap
+
 regression: smoke grade-mmap grade-cow grade-traps
 
 grade-all-heavy: grade-all
@@ -368,4 +393,4 @@ grade-all:
 	$(GRADER_DIR)/grade-lab-mmap --no-make $(GRADEFLAGS)
 
 .PHONY: build image clean tags qemu qemu-net qemu-gdb qemu-gdb-net server ping print-gdbport \
-	grade $(addprefix grade-,$(GRADE_LABS)) smoke regression grade-all grade-all-heavy ph barrier
+	grade $(addprefix grade-,$(GRADE_LABS)) smoke test-smoke-go test-smoke-util test-smoke-syscall test-smoke-pgtbl test-smoke-traps test-smoke-net test-smoke-fs test-smoke-mmap regression grade-all grade-all-heavy ph barrier

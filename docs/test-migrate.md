@@ -1,0 +1,413 @@
+# Host-Side Test Runner Migration Plan
+
+本文档用于敲定测试系统迁移计划：用 Go 重写 host-side test runner，逐步替换当前 Python `gradelib.py` 与 `graders/grade-lab-*` 体系，并移除“grade / 评分”语义。迁移目标不是改变 xv6 guest 内部测试程序，而是重构宿主机侧的构建、启动 QEMU、执行命令、匹配输出、汇总结果和记录日志的流程。
+
+## 1. 目标与边界
+
+### 1.1 目标
+
+- 实现一个 Go 编写的 host-side test runner，作为后续统一测试入口。
+- 将“grade”命名逐步替换为“test / check / suite / runner”等测试语义。
+- 保留现有 xv6 guest-side C 测试程序，例如 `user/usertests.c`、`user/mmaptest.c`、`user/nettests.c`、`user/cowtest.c`、`user/bigfile.c`。
+- 保留 Makefile 作为用户入口层，但将底层执行逻辑逐步切换到 Go runner。
+- 支持分层测试：smoke、regression、heavy、stress、per-lab、per-subsystem。
+- 支持结构化结果输出，便于后续接入 CI 或生成测试报告。
+
+### 1.2 非目标
+
+- 不重写 xv6 guest 内部测试程序为 Go。
+- 不改变 lab 功能语义或为了测试迁移修改内核行为。
+- 不追求完整 POSIX 测试套件。
+- 不立即删除 Python runner；先通过并行验证建立等价性，再逐步退场。
+- 不把课程原始 grader 语义继续作为长期接口设计核心。
+
+## 2. 当前测试系统现状
+
+### 2.1 Host-side 组成
+
+- `gradelib.py`
+  - 负责解析参数、启动 QEMU、连接 gdbstub、注入 xv6 shell 命令、匹配输出、保存日志。
+- `graders/grade-lab-*`
+  - 每个 lab 一个 Python 脚本，描述测试 case、期望输出和分值。
+  - 目前虽然已经移动到 `graders/`，但命名和输出仍保留课程评分语义。
+- Go runner (`cmd/xv6test`) 已实现 `list` / `run` 命令，支持 `--suite`、`--case`、`--tags`、`--log-dir`、`--timeout`。
+- `Makefile`
+  - 暴露 `make grade-*`、`make smoke`、`make regression`、`make grade-all`、`make grade-all-heavy`。
+  - `make smoke` 已经是轻量测试入口，但内部仍调用 Python grader。
+- `quick.sh`
+  - 当前只是 `make smoke` 的兼容包装。
+- `cmd/xv6test`
+  - Go host-side runner 的并行迁移入口。
+  - 当前已支持通过 `make qemu` 启动 xv6、向 shell 注入命令、用 regex 匹配输出、保存日志。
+  - 当前 Makefile 并行入口是 `make test-smoke-go`，暂不替换原有 `make smoke`。
+  - 当前 smoke suite 已接入 util、syscall、pgtbl、traps、net、fs、mmap 中可用 regex 表达的首批用例。
+
+### 2.2 Guest-side 组成
+
+- `user/usertests.c`
+  - 综合用户态测试，覆盖面广但耗时重。
+- `user/mmaptest.c`
+  - mmap 相关测试。
+- `user/nettests.c`
+  - net lab 相关测试。
+- `user/cowtest.c`
+  - COW 相关测试。
+- `user/pgtbltest.c`
+  - pgtbl 相关测试。
+- `user/alarmtest.c`
+  - traps / alarm 相关测试。
+- `user/bigfile.c`、`user/symlinktest.c`
+  - fs lab 相关测试。
+- `user/kalloctest.c`、`user/bcachetest.c`、`user/stats.c`
+  - lock / allocator / bcache 相关测试。
+
+## 3. 命名迁移原则
+
+后续命名应从“评分”转为“测试”。旧命名只在兼容层保留，不再作为新接口扩展方向。
+
+| 当前名称 | 目标名称 | 说明 |
+| --- | --- | --- |
+| `gradelib.py` | `testrunner` 或 `xv6test` | Go runner 二进制名称待定，建议 `xv6test` |
+| `graders/` | `tests/host/` 或 `tests/suites/` | 保存 host-side 测试 suite 描述 |
+| `grade-lab-*` | `suite-*.json` / `*.yaml` / Go 注册表 | 测试套件不再包含分值概念 |
+| `make grade-*` | `make test-*` | `grade-*` 可作为过渡别名 |
+| `make grade-all` | `make test-all` | 完整测试，不表示评分 |
+| `make grade-all-heavy` | `make test-heavy` | 重型测试入口 |
+
+建议长期入口：
+
+- `make test-smoke`
+- `make test-regression`
+- `make test-heavy`
+- `make test-all`
+- `make test-mmap`
+- `make test-fs`
+- `make test-lock`
+- `make test-net`
+
+过渡期可保留：
+
+- `make smoke`
+- `make regression`
+- `make grade-*`
+- `make grade-all`
+
+## 4. Go Runner 设计
+
+### 4.1 目录建议
+
+建议新增：
+
+```text
+cmd/xv6test/
+  main.go
+internal/testrunner/
+  runner.go
+  qemu.go
+  matcher.go
+  suite.go
+  report.go
+tests/suites/
+  smoke.yaml
+  mmap.yaml
+  fs.yaml
+  lock.yaml
+  net.yaml
+```
+
+如果希望先减少格式设计成本，也可以第一阶段不用 YAML/JSON，直接在 Go 中注册 suite；等 runner 稳定后再把 case 描述数据化。
+
+### 4.2 核心能力
+
+- 启动 QEMU：
+  - 调用 `make qemu-gdb` 或直接调用 `qemu-system-riscv64`。
+  - 推荐第一阶段继续通过 Makefile 启动，减少参数漂移。
+- 连接 gdbstub：
+  - 复用当前 `qemu-gdb` 模式下的 gdbstub 行为。
+  - 先实现与 `gradelib.py` 等价的等待和超时逻辑。
+- 注入 xv6 shell 命令：
+  - 支持单条命令。
+  - 支持一组命令在同一个 QEMU 实例中顺序执行。
+  - 支持命令执行后自动 shutdown。
+- 匹配输出：
+  - 支持 regex 匹配。
+  - 支持 forbidden regex。
+  - 支持多段有序匹配。
+  - 支持保存完整输出供失败排查。
+- 超时控制：
+  - 每个 case 有独立 timeout。
+  - 每个 suite 有整体 timeout。
+  - 超时后可靠终止 QEMU。
+- 结构化报告：
+  - 默认人类可读输出。
+  - 可选 JSON 输出。
+  - 后续可选 JUnit XML 输出。
+- 测试分层：
+  - 按 suite、tag、subsystem、heavy 标记筛选。
+
+### 4.3 测试 case 数据模型
+
+建议每个 case 至少包含：
+
+```text
+name
+suite
+tags
+buildTargets
+qemuMode
+commands
+expect
+reject
+timeout
+heavy
+artifacts
+```
+
+字段含义：
+
+- `name`：测试名。
+- `suite`：所属套件，例如 `mmap`、`fs`、`lock`。
+- `tags`：例如 `smoke`、`regression`、`heavy`、`net`。
+- `buildTargets`：运行前需要的构建目标，例如 `image`、`build`。
+- `qemuMode`：普通 QEMU、带网络转发 QEMU、或 host-only。
+- `commands`：进入 xv6 shell 后执行的命令列表。
+- `expect`：必须匹配的输出 regex。
+- `reject`：不能出现的输出 regex。
+- `timeout`：case 级超时。
+- `heavy`：是否重型测试。
+- `artifacts`：失败时保存的日志、pcap 或 QEMU 输出。
+
+## 5. 迁移阶段
+
+### Phase 0：冻结现有语义
+
+- [ ] 记录当前 `make smoke`、`make regression`、`make grade-*` 的覆盖范围和输出。
+- [ ] 记录每个 suite 的平均耗时。
+- [ ] 确认哪些测试必须保留课程原始匹配，哪些可以改成项目自有匹配。
+- [ ] 为失败日志路径建立统一目录，例如 `build/test-logs/`。
+
+验证方式：
+
+- 运行 `make smoke`。
+- 运行当前重点定向测试：`make grade-mmap`、`make grade-cow`、`make grade-traps`。
+- 保存输出样例，作为 Go runner 迁移对照。
+
+### Phase 1：实现最小 Go Runner
+
+- [x] 新增 `cmd/xv6test`。
+- [x] 实现 `xv6test run --suite smoke`，能启动 QEMU、执行 xv6 shell 命令并匹配输出。
+- [x] 支持 timeout 和 QEMU 进程组清理。
+- [x] 支持保存 stdout 日志到 `build/test-logs/`。
+- [x] 保持 Makefile 启动 QEMU 的参数来源，避免 QEMU 配置重复维护。
+- [x] 支持按单个 case 执行的 CLI 语义：`xv6test run --suite smoke --case <case>`。
+- [x] 继续扩展 suite/case 数据模型，补充 tag、heavy、artifacts、host-only 等字段。
+  - `Tags []string` — 已实现，所有 smoke case 打上子系统 + "smoke" 标签。
+  - `Heavy bool` — 已预留字段，待 Phase 4 使用。
+  - `Artifacts []string` — 已预留字段，暂未在运行器中消费。
+  - Host-only — 待后续 Phase 补充，当前所有 case 均需 QEMU。
+
+首批迁移 case：
+
+- `sleep-returns`（已接入 `make test-smoke-go`）
+- `pingpong`（已接入 `make test-smoke-go`）
+- `primes`（已接入 `make test-smoke-go`）
+- `find-current-directory`（已接入 `make test-smoke-go`）
+- `find-recursive`（已接入 `make test-smoke-go`）
+- `xargs`（已接入 `make test-smoke-go`，使用次数匹配验证 `hello` 输出）
+- `trace-32-grep`（已接入 `make test-smoke-go`）
+- `trace-all-grep`（已接入 `make test-smoke-go`）
+- `trace-nothing`（已接入 `make test-smoke-go`）
+- `trace-children`（已接入 `make test-smoke-go`，当前验证 fork trace 数量下限）
+- `sysinfotest`（已接入 `make test-smoke-go`）
+- `pgtbltest`（已接入 `make test-smoke-go`）
+- `pte-printout`（已接入 `make test-smoke-go`，当前验证启动页表打印的关键格式）
+- `bttest`（已接入 `make test-smoke-go`，当前验证命令可运行且不 panic）
+- `alarmtest`（已接入 `make test-smoke-go`）
+- `nettests`（已接入 `make test-smoke-go`，依赖 host-side `make server`）
+- `symlinktest`（已接入 `make test-smoke-go`）
+- `mmaptest`（已接入 `make test-smoke-go`）
+
+暂未完全等价迁移的旧 Python 断言：
+
+- `sleep 10` 的 `sys_sleep` gdb breakpoint 检查，需要 Go runner 支持 gdbstub / breakpoint。
+- `pte printout` 的 pte / pa 严格对应关系校验，需要 Go runner 支持自定义结构化断言。
+- `bttest` 的 backtrace 地址到源码位置映射，需要 Go runner 支持 `addr2line` 集成。
+- `trace children` 的多 PID 继承校验目前先迁移为 fork trace 数量下限，后续可补充唯一 PID 数量断言。
+
+验证方式：
+
+- Go runner 跑出的结果与当前 `make smoke` 中对应 Python one-liner / grader case 等价。
+- 当前已验证：`make test-smoke-go` 能通过已接入的首批 smoke case，并将日志保存到 `build/test-logs/smoke/`。
+
+### Phase 2：迁移 smoke suite
+
+- [ ] 用 Go runner 实现 `test-smoke`。
+- [ ] 将当前 `make smoke` 的测试范围迁到 Go runner：
+  - util
+  - syscall
+  - net
+  - pgtbl
+  - traps
+  - symlinktest
+  - mmaptest
+- [ ] 给 `make smoke` 增加过渡实现：内部调用 `make test-smoke`。
+- [ ] 保留 Python smoke 对照入口一段时间，例如 `make smoke-py`。
+
+验证方式：
+
+- `make smoke` 与旧 Python smoke 结果一致。
+- 记录耗时，确认没有明显变慢。
+
+### Phase 3：迁移 per-subsystem suite
+
+- [ ] 实现 `make test-mmap`，替代 `make grade-mmap` 的测试语义。
+- [ ] 实现 `make test-cow`。
+- [ ] 实现 `make test-traps`。
+- [ ] 实现 `make test-net`。
+- [ ] 实现 `make test-thread`，覆盖 host-only `notxv6/ph`、`notxv6/barrier` 和 guest `uthread`。
+- [ ] 实现 `make test-lock`。
+- [ ] 实现 `make test-fs`。
+
+迁移规则：
+
+- 每迁移一个 suite，保留旧 Python 入口作为对照。
+- 新入口不输出分值，只输出 pass / fail、耗时和失败日志位置。
+- 如果旧 grader 的分值只是课程历史信息，不迁入新 runner。
+
+验证方式：
+
+- 每个 `make test-*` 与对应旧 `make grade-*` 在通过/失败上保持一致。
+
+### Phase 4：拆分 usertests 与重型测试
+
+- [ ] 梳理 `user/usertests.c` 中适合轻量化的 case。
+- [ ] 建立 `test-usertests-smoke` 或等价入口，只跑低成本 case。
+- [ ] 保留完整 `usertests` 在 heavy suite。
+- [ ] 将 `bigfile` 固定放入 heavy 或 fs-heavy suite。
+- [ ] 将 lock 全量压力项放入 heavy 或 lock-heavy suite。
+
+建议分层：
+
+- `test-smoke`：提交前快速反馈。
+- `test-regression`：日常中等回归。
+- `test-heavy`：完整大文件、完整 usertests、lock/fs 压力。
+- `test-stress`：长时间压力或循环测试，默认不跑。
+
+验证方式：
+
+- `test-smoke` 不包含 `bigfile`、完整 `usertests`、完整 lock 压力。
+- `test-heavy` 覆盖这些重型项，并在 README 中说明耗时预期。
+
+### Phase 5：退场 Python grader
+
+- [ ] 删除或归档 `gradelib.py`。
+- [ ] 删除或归档 `graders/grade-lab-*`。
+- [ ] 移除 `grade-*` 作为主入口。
+- [ ] 如需兼容，保留短期 alias：
+  - `make grade-mmap` 打印迁移提示并调用 `make test-mmap`。
+  - `make grade-all` 打印迁移提示并调用 `make test-all`。
+- [ ] 更新 `README.md`、`AGENTS.md`、`docs/TODO.md`、`docs/lab-migration-plan.md`。
+
+验证方式：
+
+- 干净仓库中执行 `make test-smoke`、`make test-regression`、`make test-heavy`。
+- 确认没有 Python runner 依赖。
+
+## 6. Makefile 迁移计划
+
+### 6.1 新入口
+
+新增：
+
+```text
+test-smoke
+test-regression
+test-heavy
+test-all
+test-util
+test-syscall
+test-net
+test-pgtbl
+test-traps
+test-cow
+test-thread
+test-lock
+test-fs
+test-mmap
+```
+
+### 6.2 过渡入口
+
+保留但不继续扩展：
+
+```text
+smoke
+regression
+grade-*
+grade-all
+grade-all-heavy
+```
+
+过渡期行为：
+
+- `smoke` 调用 `test-smoke`。
+- `regression` 调用 `test-regression`。
+- `grade-*` 调用对应 `test-*`，并可输出一行迁移提示。
+- `grade-all-heavy` 调用 `test-heavy`。
+
+### 6.3 最终入口
+
+长期文档只推荐：
+
+```text
+make test-smoke
+make test-regression
+make test-heavy
+make test-all
+make test-<subsystem>
+```
+
+## 7. 报告与日志
+
+Go runner 应统一管理测试输出：
+
+- 成功时输出：
+  - suite 名称；
+  - case 数；
+  - 总耗时；
+  - 每个失败 case 的摘要。
+- 失败时保存：
+  - QEMU stdout；
+  - host-side runner 日志；
+  - case 配置；
+  - 可选 `packets.pcap`。
+- 可选输出：
+  - `--json build/test-logs/result.json`
+  - `--junit build/test-logs/junit.xml`
+
+建议目录：
+
+```text
+build/test-logs/
+  smoke/
+  regression/
+  heavy/
+```
+
+## 8. 风险与约束
+
+- QEMU / gdbstub 控制逻辑迁移风险较高，必须保留旧 Python runner 做一段时间对照。
+- 过早删除 `grade-*` 会破坏已有使用习惯，建议先 alias 再退场。
+- 不要在迁移 runner 的同时大规模修改 guest-side C 测试，否则很难定位回归来源。
+- 不要把分值概念带入新 runner；新 runner 只关心 pass / fail / skip / timeout。
+- 不要默认运行重型测试，避免 `bigfile` 和完整 `usertests` 拖慢日常反馈。
+
+## 9. 第一批可执行任务
+
+1. 新增 `cmd/xv6test` skeleton。
+2. 实现最小命令：`xv6test run --suite smoke --case mmaptest`。
+3. 实现 QEMU 启动、shell 命令注入、regex 匹配、timeout、日志保存。
+4. 用 Go runner 复刻当前 `make smoke` 中可用通用 regex / 次数匹配表达的 util、syscall、pgtbl、traps、net、fs、mmap case。
+5. 新增 `make test-smoke-go` 作为并行入口，不替换现有 `make smoke`。（已完成）
+6. 比较 Go runner 与当前 Python runner 的输出、耗时和失败日志质量。
+7. 稳定后将 `make smoke` 切换到 Go runner，并保留 `make smoke-py` 作为短期回退。

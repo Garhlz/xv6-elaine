@@ -27,3 +27,5 @@ barrier
 /lab-*.json
 .DS_Store
 *.pcap
+/xv6test
+/build/go-cache/
