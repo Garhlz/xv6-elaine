@@ -2,22 +2,17 @@
 
 当前 `dev/all` 已完成 `util`、`syscall`、`pgtbl`、`traps`、`cow`、`thread`、`net`、`lock`、`fs`、`mmap` 的功能整合。后续重点从“迁移 lab”转为“整理集成后的教学 OS 工程质量”。
 
-## P0：稳定基线与工程地基
+## P0：稳定基线与工程地基（✅ 已完成）
 
-- 推送当前 `dev/all` 稳定点，作为“所有 lab 已集成”的远端基线。
-- 重构 `Makefile`，把构建产物移出源码目录：
-  - 目标目录建议为 `build/kernel/`、`build/user/`、`build/mkfs/`、`build/fs.img`。
-  - 移出 `*.o`、`*.d`、`*.asm`、`*.sym`、`user/_*`、`kernel/kernel`、`mkfs/mkfs`、`fs.img`。
-  - 保持现有 `make qemu`、`make grade-*`、`make clean` 入口兼容。
-  - 避免多个 grader 并行或连续运行时互相清理构建产物。
-- 整理 `.gitignore`，确保生成物、QEMU 输出、pcap、临时日志不会污染工作区。
-- 给 `Makefile` 增加清晰分层目标：
-  - `make build`
-  - `make image`
-  - `make smoke`
-  - `make grade-<lab>`
-  - `make regression`
-  - `make grade-all-heavy`
+- `Makefile` 已将构建产物移到 `build/`：
+  - `build/kernel/`：kernel、kernel symbol/asm、kernel object/dependency files、initcode 产物。
+  - `build/user/`：用户程序、user object/dependency files、user asm/sym、`usys.S`。
+  - `build/mkfs/`、`build/notxv6/`、`build/fs.img`：host tools、thread lab host binaries、文件系统镜像。
+- 现有入口保持兼容：`make qemu`、`make qemu-gdb`、`make grade-*`、`make grade-all` 仍可用，但不再生成旧源码树产物路径。
+- `.gitignore` 已统一忽略 `build/`、QEMU 输出、pcap 和旧路径残留生成物。
+- 已新增分层目标：`make build`、`make image`、`make smoke`、`make regression`、`make grade-all-heavy`。
+- `quick.sh` 保留为兼容入口，并委托 `make smoke`。
+- `grade-lab-*` 已统一移动到 `graders/`，`make grade-*` 继续作为稳定入口。
 
 ## P1：VM 与缺页路径整理
 
@@ -76,7 +71,7 @@
 ## P5：测试系统重构
 
 - 保留 `grade-*` 作为课程 grader 兼容入口，但不要把它作为日常开发唯一入口。
-- 将 `quick.sh` 正式并入 `Makefile`，形成 `make smoke`。
+- `quick.sh` 已正式并入 `Makefile`，形成 `make smoke`；后续重点是继续扩展中重型测试分层。
 - 新增分层测试入口：
   - `make smoke`：提交前快速检查，目标 30 到 90 秒。
   - `make regression`：日常中等回归，目标 2 到 5 分钟。
@@ -223,6 +218,6 @@ begin_sleep_commit、begin_sleep_space、install_blocks），在相应路径更�
   - `make stress`
 - 每次提交前至少跑：
   - `git diff --check`
-  - `make kernel/kernel fs.img`
+  - `make build image`
   - 与改动子系统对应的定向测试
 - 每次阶段性合并前跑完整重型回归，并记录耗时和失败日志路径。

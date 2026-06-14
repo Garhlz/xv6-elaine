@@ -1,60 +1,73 @@
-
 # To compile and run with a lab solution, set the lab name in lab.mk
 # (e.g., LAB=util).  Run make grade to test solution with the lab's
 # grade script (e.g., grade-lab-util).
 
 -include conf/lab.mk
 
-K=kernel
-U=user
+.DEFAULT_GOAL := build
 
-OBJS = \
-  $K/entry.o \
-  $K/kalloc.o \
-  $K/string.o \
-  $K/main.o \
-  $K/vm.o \
-  $K/proc.o \
-  $K/swtch.o \
-  $K/trampoline.o \
-  $K/trap.o \
-  $K/syscall.o \
-  $K/sysproc.o \
-  $K/bio.o \
-  $K/fs.o \
-  $K/log.o \
-  $K/sleeplock.o \
-  $K/file.o \
-  $K/pipe.o \
-  $K/exec.o \
-  $K/sysfile.o \
-  $K/kernelvec.o \
-  $K/plic.o \
-  $K/virtio_disk.o \
-  $K/stats.o \
-  $K/sprintf.o \
-  $K/e1000.o \
-  $K/net.o \
-  $K/sysnet.o \
-  $K/pci.o
+K = kernel
+U = user
+BUILD = build
+KBUILD = $(BUILD)/kernel
+UBUILD = $(BUILD)/user
+MKFSBUILD = $(BUILD)/mkfs
+NOTXV6BUILD = $(BUILD)/notxv6
 
-OBJS_KCSAN = \
-  $K/start.o \
-  $K/console.o \
-  $K/printf.o \
-  $K/uart.o \
-  $K/spinlock.o
+KERNEL = $(KBUILD)/kernel
+FSIMG = $(BUILD)/fs.img
+GDBINIT = $(BUILD)/.gdbinit
+MKFS = $(MKFSBUILD)/mkfs
+PH = $(NOTXV6BUILD)/ph
+BARRIER = $(NOTXV6BUILD)/barrier
+
+KOBJS = \
+  $(KBUILD)/entry.o \
+  $(KBUILD)/kalloc.o \
+  $(KBUILD)/string.o \
+  $(KBUILD)/main.o \
+  $(KBUILD)/vm.o \
+  $(KBUILD)/proc.o \
+  $(KBUILD)/swtch.o \
+  $(KBUILD)/trampoline.o \
+  $(KBUILD)/trap.o \
+  $(KBUILD)/syscall.o \
+  $(KBUILD)/sysproc.o \
+  $(KBUILD)/bio.o \
+  $(KBUILD)/fs.o \
+  $(KBUILD)/log.o \
+  $(KBUILD)/sleeplock.o \
+  $(KBUILD)/file.o \
+  $(KBUILD)/pipe.o \
+  $(KBUILD)/exec.o \
+  $(KBUILD)/sysfile.o \
+  $(KBUILD)/kernelvec.o \
+  $(KBUILD)/plic.o \
+  $(KBUILD)/virtio_disk.o \
+  $(KBUILD)/stats.o \
+  $(KBUILD)/sprintf.o \
+  $(KBUILD)/e1000.o \
+  $(KBUILD)/net.o \
+  $(KBUILD)/sysnet.o \
+  $(KBUILD)/pci.o
+
+KOBJS_KCSAN = \
+  $(KBUILD)/start.o \
+  $(KBUILD)/console.o \
+  $(KBUILD)/printf.o \
+  $(KBUILD)/uart.o \
+  $(KBUILD)/spinlock.o
 
 ifdef KCSAN
-OBJS_KCSAN += \
-	$K/kcsan.o
+KOBJS_KCSAN += \
+	$(KBUILD)/kcsan.o
 endif
 
 # riscv64-unknown-elf- or riscv64-linux-gnu-
 # perhaps in /opt/riscv/bin
-#TOOLPREFIX = 
+#TOOLPREFIX =
 
-# Try to infer the correct TOOLPREFIX if not set
+# Try to infer the correct TOOLPREFIX if not set.
 ifndef TOOLPREFIX
 TOOLPREFIX := $(shell if riscv64-unknown-elf-objdump -i 2>&1 | grep 'elf64-big' >/dev/null 2>&1; \
 	then echo 'riscv64-unknown-elf-'; \
@@ -97,7 +110,7 @@ CFLAGS += -DKCSAN
 KCSANFLAG = -fsanitize=thread
 endif
 
-# Disable PIE when possible (for Ubuntu 16.10 toolchain)
+# Disable PIE when possible (for Ubuntu 16.10 toolchain).
 ifneq ($(shell $(CC) -dumpspecs 2>/dev/null | grep -e '[^f]no-pie'),)
 CFLAGS += -fno-pie -no-pie
 endif
@@ -107,126 +120,138 @@ endif
 
 LDFLAGS = -z max-page-size=4096
 
-$K/kernel: $(OBJS) $(OBJS_KCSAN) $K/kernel.ld $U/initcode
-	$(LD) $(LDFLAGS) -T $K/kernel.ld -o $K/kernel $(OBJS) $(OBJS_KCSAN)
-	$(OBJDUMP) -S $K/kernel > $K/kernel.asm
-	$(OBJDUMP) -t $K/kernel | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $K/kernel.sym
+$(BUILD) $(KBUILD) $(UBUILD) $(MKFSBUILD) $(NOTXV6BUILD):
+	mkdir -p $@
 
-$(OBJS): EXTRAFLAG := $(KCSANFLAG)
+image: $(FSIMG)
 
-$K/%.o: $K/%.c
+$(KERNEL): $(KOBJS) $(KOBJS_KCSAN) $(K)/kernel.ld $(KBUILD)/initcode | $(KBUILD)
+	$(LD) $(LDFLAGS) -T $(K)/kernel.ld -o $@ $(KOBJS) $(KOBJS_KCSAN)
+	$(OBJDUMP) -S $@ > $(KBUILD)/kernel.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(KBUILD)/kernel.sym
+
+$(KOBJS): EXTRAFLAG := $(KCSANFLAG)
+
+$(KBUILD)/%.o: $(K)/%.c | $(KBUILD)
 	$(CC) $(CFLAGS) $(EXTRAFLAG) -c -o $@ $<
 
+$(KBUILD)/%.o: $(K)/%.S | $(KBUILD)
+	$(CC) $(CFLAGS) $(EXTRAFLAG) -c -o $@ $<
 
-$U/initcode: $U/initcode.S
-	$(CC) $(CFLAGS) -march=rv64g -nostdinc -I. -Ikernel -c $U/initcode.S -o $U/initcode.o
-	$(LD) $(LDFLAGS) -N -e start -Ttext 0 -o $U/initcode.out $U/initcode.o
-	$(OBJCOPY) -S -O binary $U/initcode.out $U/initcode
-	$(OBJDUMP) -S $U/initcode.o > $U/initcode.asm
+$(KBUILD)/initcode: $(U)/initcode.S | $(KBUILD)
+	$(CC) $(CFLAGS) -march=rv64g -nostdinc -I. -I$(K) -c $< -o $(KBUILD)/initcode.o
+	$(LD) $(LDFLAGS) -N -e start -Ttext 0 -o $(KBUILD)/initcode.out $(KBUILD)/initcode.o
+	$(OBJCOPY) -S -O binary $(KBUILD)/initcode.out $@
+	$(OBJDUMP) -S $(KBUILD)/initcode.o > $(KBUILD)/initcode.asm
 
-tags: $(OBJS) _init
+tags: $(KOBJS) $(UBUILD)/_init
 	etags *.S *.c
 
-ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o $U/statistics.o
+ULIB = $(UBUILD)/ulib.o $(UBUILD)/usys.o $(UBUILD)/printf.o $(UBUILD)/umalloc.o $(UBUILD)/statistics.o
 
-_%: %.o $(ULIB)
-	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $^
-	$(OBJDUMP) -S $@ > $*.asm
-	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $*.sym
-
-$U/usys.S : $U/usys.pl
-	perl $U/usys.pl > $U/usys.S
-
-$U/usys.o : $U/usys.S
-	$(CC) $(CFLAGS) -c -o $U/usys.o $U/usys.S
-
-$U/_forktest: $U/forktest.o $(ULIB)
-	# forktest has less library code linked in - needs to be small
-	# in order to be able to max out the proc table.
-	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $U/_forktest $U/forktest.o $U/ulib.o $U/usys.o
-	$(OBJDUMP) -S $U/_forktest > $U/forktest.asm
-
-mkfs/mkfs: mkfs/mkfs.c $K/fs.h $K/param.h
-	gcc $(XCFLAGS) -Werror -Wall -I. -o mkfs/mkfs mkfs/mkfs.c
-
-# Prevent deletion of intermediate files, e.g. cat.o, after first build, so
-# that disk image changes after first build are persistent until clean.  More
-# details:
-# http://www.gnu.org/software/make/manual/html_node/Chained-Rules.html
-.PRECIOUS: %.o
-
-UPROGS=\
-	$U/_cat\
-	$U/_echo\
-	$U/_find\
-	$U/_forktest\
-	$U/_grep\
-	$U/_init\
-	$U/_kill\
-	$U/_ln\
-	$U/_ls\
-	$U/_mkdir\
-	$U/_pingpong\
-	$U/_primes\
-	$U/_rm\
-	$U/_sh\
-	$U/_sleep\
-	$U/_stressfs\
-	$U/_usertests\
-	$U/_grind\
-	$U/_wc\
-	$U/_xargs\
-	$U/_zombie\
-	$U/_trace\
-	$U/_sysinfotest\
-	$U/_pgtbltest\
-	$U/_bttest\
-	$U/_alarmtest\
-	$U/_nettests\
-	$U/_cowtest\
-	$U/_uthread\
-	$U/_stats\
-	$U/_kalloctest\
-	$U/_bcachetest\
-	$U/_bigfile\
-	$U/_symlinktest\
-	$U/_mmaptest\
+UPROGS = \
+	$(UBUILD)/_cat \
+	$(UBUILD)/_echo \
+	$(UBUILD)/_find \
+	$(UBUILD)/_forktest \
+	$(UBUILD)/_grep \
+	$(UBUILD)/_init \
+	$(UBUILD)/_kill \
+	$(UBUILD)/_ln \
+	$(UBUILD)/_ls \
+	$(UBUILD)/_mkdir \
+	$(UBUILD)/_pingpong \
+	$(UBUILD)/_primes \
+	$(UBUILD)/_rm \
+	$(UBUILD)/_sh \
+	$(UBUILD)/_sleep \
+	$(UBUILD)/_stressfs \
+	$(UBUILD)/_usertests \
+	$(UBUILD)/_grind \
+	$(UBUILD)/_wc \
+	$(UBUILD)/_xargs \
+	$(UBUILD)/_zombie \
+	$(UBUILD)/_trace \
+	$(UBUILD)/_sysinfotest \
+	$(UBUILD)/_pgtbltest \
+	$(UBUILD)/_bttest \
+	$(UBUILD)/_alarmtest \
+	$(UBUILD)/_nettests \
+	$(UBUILD)/_cowtest \
+	$(UBUILD)/_uthread \
+	$(UBUILD)/_stats \
+	$(UBUILD)/_kalloctest \
+	$(UBUILD)/_bcachetest \
+	$(UBUILD)/_bigfile \
+	$(UBUILD)/_symlinktest \
+	$(UBUILD)/_mmaptest
 
 ifeq ($(LAB),lazy)
 UPROGS += \
-	$U/_lazytests
+	$(UBUILD)/_lazytests
 endif
 
-$U/uthread_switch.o : $U/uthread_switch.S
-	$(CC) $(CFLAGS) -c -o $U/uthread_switch.o $U/uthread_switch.S
+build: $(KERNEL) $(UPROGS) $(MKFS) $(PH) $(BARRIER)
 
-$U/_uthread: $U/uthread.o $U/uthread_switch.o $(ULIB)
-	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $U/_uthread $U/uthread.o $U/uthread_switch.o $(ULIB)
-	$(OBJDUMP) -S $U/_uthread > $U/uthread.asm
+$(UBUILD)/%.o: $(U)/%.c | $(UBUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-ph: notxv6/ph.c
-	gcc -o ph -g -O2 $(XCFLAGS) notxv6/ph.c -pthread
+$(UBUILD)/%.o: $(U)/%.S | $(UBUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-barrier: notxv6/barrier.c
-	gcc -o barrier -g -O2 $(XCFLAGS) notxv6/barrier.c -pthread
+$(UBUILD)/usys.S: $(U)/usys.pl | $(UBUILD)
+	perl $< > $@
 
-UEXTRA=
-UEXTRA += user/xargstest.sh
+$(UBUILD)/usys.o: $(UBUILD)/usys.S | $(UBUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
+$(UBUILD)/_%: $(UBUILD)/%.o $(ULIB) | $(UBUILD)
+	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $^
+	$(OBJDUMP) -S $@ > $(UBUILD)/$*.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/$*.sym
 
-fs.img: mkfs/mkfs README README.md $(UEXTRA) $(UPROGS)
-	mkfs/mkfs fs.img README README.md $(UEXTRA) $(UPROGS)
+$(UBUILD)/_forktest: $(UBUILD)/forktest.o $(ULIB) | $(UBUILD)
+	# forktest has less library code linked in - needs to be small
+	# in order to be able to max out the proc table.
+	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $(UBUILD)/forktest.o $(UBUILD)/ulib.o $(UBUILD)/usys.o
+	$(OBJDUMP) -S $@ > $(UBUILD)/forktest.asm
 
--include kernel/*.d user/*.d
+$(UBUILD)/_uthread: $(UBUILD)/uthread.o $(UBUILD)/uthread_switch.o $(ULIB) | $(UBUILD)
+	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $(UBUILD)/uthread.o $(UBUILD)/uthread_switch.o $(ULIB)
+	$(OBJDUMP) -S $@ > $(UBUILD)/uthread.asm
 
-clean: 
-	rm -f *.tex *.dvi *.idx *.aux *.log *.ind *.ilg \
-	*/*.o */*.d */*.asm */*.sym \
-	$U/initcode $U/initcode.out $K/kernel fs.img \
-	mkfs/mkfs .gdbinit \
-        $U/usys.S \
-	$(UPROGS) \
-	ph barrier
+$(MKFS): mkfs/mkfs.c $(K)/fs.h $(K)/param.h | $(MKFSBUILD)
+	gcc $(XCFLAGS) -Werror -Wall -I. -o $@ $<
+
+$(PH): notxv6/ph.c | $(NOTXV6BUILD)
+	gcc -o $@ -g -O2 $(XCFLAGS) $< -pthread
+
+$(BARRIER): notxv6/barrier.c | $(NOTXV6BUILD)
+	gcc -o $@ -g -O2 $(XCFLAGS) $< -pthread
+
+ph: $(PH)
+
+barrier: $(BARRIER)
+
+UEXTRA =
+UEXTRA += $(U)/xargstest.sh
+
+$(FSIMG): $(MKFS) README README.md $(UEXTRA) $(UPROGS) | $(BUILD)
+	$(MKFS) $@ README README.md $(UEXTRA) $(UPROGS)
+
+# Prevent deletion of intermediate files after the first build.
+.PRECIOUS: $(KBUILD)/%.o $(UBUILD)/%.o
+
+-include $(KBUILD)/*.d $(UBUILD)/*.d
+
+clean:
+	rm -rf $(BUILD) \
+		*.tex *.dvi *.idx *.aux *.log *.ind *.ilg \
+		.gdbinit fs.img packets.pcap xv6.out* \
+		ph barrier \
+		$(K)/kernel $(K)/*.o $(K)/*.d $(K)/*.asm $(K)/*.sym \
+		$(U)/_* $(U)/*.o $(U)/*.d $(U)/*.asm $(U)/*.sym $(U)/initcode $(U)/initcode.out $(U)/usys.S \
+		mkfs/mkfs
 
 # try to generate a unique GDB port
 GDBPORT = $(shell expr `id -u` % 5000 + 25000)
@@ -244,27 +269,28 @@ endif
 FWDPORT ?= $(shell expr `id -u` % 5000 + 25999)
 NETFWD ?= 0
 
-QEMUOPTS = -machine virt -bios none -kernel $K/kernel -m 128M -smp $(CPUS) -nographic
-QEMUOPTS += -drive file=fs.img,if=none,format=raw,id=x0
+QEMUOPTS = -machine virt -bios none -kernel $(KERNEL) -m 128M -smp $(CPUS) -nographic
+QEMUOPTS += -drive file=$(FSIMG),if=none,format=raw,id=x0
 QEMUOPTS += -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0
 
 ifeq ($(NETFWD),1)
-QEMUOPTS += -netdev user,id=net0,hostfwd=udp::$(FWDPORT)-:2000 -object filter-dump,id=net0,netdev=net0,file=packets.pcap
+QEMUOPTS += -netdev user,id=net0,hostfwd=udp::$(FWDPORT)-:2000 -object filter-dump,id=net0,netdev=net0,file=$(BUILD)/packets.pcap
 else
 QEMUOPTS += -netdev user,id=net0
 endif
 QEMUOPTS += -device e1000,netdev=net0,bus=pcie.0
+QEMUOPTS += $(QEMUEXTRA)
 
-qemu: $K/kernel fs.img
+qemu: $(KERNEL) image
 	$(QEMU) $(QEMUOPTS)
 
 qemu-net: NETFWD=1
 qemu-net: qemu
 
-.gdbinit: .gdbinit.tmpl-riscv
+$(GDBINIT): .gdbinit.tmpl-riscv | $(BUILD)
 	sed "s/:1234/:$(GDBPORT)/" < $^ > $@
 
-qemu-gdb: $K/kernel .gdbinit fs.img
+qemu-gdb: $(KERNEL) image $(GDBINIT)
 	@echo "*** Now run 'gdb' in another window." 1>&2
 	$(QEMU) $(QEMUOPTS) -S $(QEMUGDB)
 
@@ -288,6 +314,9 @@ ifneq ($(V),@)
 GRADEFLAGS += -v
 endif
 
+GRADER_DIR = graders
+GRADE_LABS = util syscall net pgtbl traps cow thread lock fs mmap
+
 print-gdbport:
 	@echo $(GDBPORT)
 
@@ -295,84 +324,48 @@ grade:
 	@echo $(MAKE) clean
 	@$(MAKE) clean || \
           (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
-	./grade-lab-$(LAB) $(GRADEFLAGS)
+	$(GRADER_DIR)/grade-lab-$(LAB) $(GRADEFLAGS)
 
-grade-util:
-	@echo $(MAKE) clean
-	@$(MAKE) clean || \
+define GRADE_RULE
+grade-$(1):
+	@echo $$(MAKE) clean
+	@$$(MAKE) clean || \
           (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
-	./grade-lab-util $(GRADEFLAGS)
+	$$(GRADER_DIR)/grade-lab-$(1) $$(GRADEFLAGS)
+endef
 
-grade-net:
-	@echo $(MAKE) clean
-	@$(MAKE) clean || \
-          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
-	./grade-lab-net $(GRADEFLAGS)
+$(foreach lab,$(GRADE_LABS),$(eval $(call GRADE_RULE,$(lab))))
 
-grade-syscall:
-	@echo $(MAKE) clean
-	@$(MAKE) clean || \
-          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
-	./grade-lab-syscall $(GRADEFLAGS)
+smoke: $(KERNEL) image
+	$(GRADER_DIR)/grade-lab-util --no-make $(GRADEFLAGS)
+	$(GRADER_DIR)/grade-lab-syscall --no-make $(GRADEFLAGS)
+	$(GRADER_DIR)/grade-lab-net --no-make $(GRADEFLAGS)
+	$(GRADER_DIR)/grade-lab-pgtbl --no-make $(GRADEFLAGS)
+	$(GRADER_DIR)/grade-lab-traps --no-make $(GRADEFLAGS)
+	python3 -c 'import types, gradelib; from gradelib import *; gradelib.options = types.SimpleNamespace(verbose=False, no_make=True, color="never"); r = Runner(); r.run_qemu(shell_script(["symlinktest"]), timeout=30); r.match("^test symlinks: ok$$"); r.match("^test concurrent symlinks: ok$$"); print("fs symlink smoke: OK")'
+	python3 -c 'import types, gradelib; from gradelib import *; gradelib.options = types.SimpleNamespace(verbose=False, no_make=True, color="never"); r = Runner(); r.run_qemu(shell_script(["mmaptest"]), timeout=60); r.match("^mmaptest: all tests succeeded$$"); print("mmap smoke: OK")'
 
-grade-pgtbl:
-	@echo $(MAKE) clean
-	@$(MAKE) clean || \
-          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
-	./grade-lab-pgtbl $(GRADEFLAGS)
+regression: smoke grade-mmap grade-cow grade-traps
 
-grade-traps:
-	@echo $(MAKE) clean
-	@$(MAKE) clean || \
-          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
-	./grade-lab-traps $(GRADEFLAGS)
-
-grade-cow:
-	@echo $(MAKE) clean
-	@$(MAKE) clean || \
-          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
-	./grade-lab-cow $(GRADEFLAGS)
-
-grade-thread:
-	@echo $(MAKE) clean
-	@$(MAKE) clean || \
-          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
-	./grade-lab-thread $(GRADEFLAGS)
-
-grade-lock:
-	@echo $(MAKE) clean
-	@$(MAKE) clean || \
-          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
-	./grade-lab-lock $(GRADEFLAGS)
-
-grade-fs:
-	@echo $(MAKE) clean
-	@$(MAKE) clean || \
-          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
-	./grade-lab-fs $(GRADEFLAGS)
-
-grade-mmap:
-	@echo $(MAKE) clean
-	@$(MAKE) clean || \
-          (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1)
-	./grade-lab-mmap $(GRADEFLAGS)
+grade-all-heavy: grade-all
 
 grade-all:
 	@echo $(MAKE) clean; \
 	$(MAKE) clean || \
           (echo "'make clean' failed.  HINT: Do you have another running instance of xv6?" && exit 1); \
-	echo $(MAKE) .gdbinit fs.img; \
-	$(MAKE) .gdbinit fs.img || \
-          (echo "'make .gdbinit fs.img' failed." && exit 1); \
-	./grade-lab-util --no-make $(GRADEFLAGS) && \
-	./grade-lab-syscall --no-make $(GRADEFLAGS) && \
-	./grade-lab-net --no-make $(GRADEFLAGS) && \
-	./grade-lab-pgtbl --no-make $(GRADEFLAGS) && \
-	./grade-lab-traps --no-make $(GRADEFLAGS) && \
-	./grade-lab-cow --no-make $(GRADEFLAGS) && \
-	./grade-lab-thread --no-make $(GRADEFLAGS) && \
-	./grade-lab-lock --no-make $(GRADEFLAGS) && \
-	./grade-lab-fs --no-make $(GRADEFLAGS) && \
-	./grade-lab-mmap --no-make $(GRADEFLAGS)
+	echo $(MAKE) $(KERNEL) image $(GDBINIT); \
+	$(MAKE) $(KERNEL) image $(GDBINIT) || \
+          (echo "'make $(KERNEL) image $(GDBINIT)' failed." && exit 1); \
+	$(GRADER_DIR)/grade-lab-util --no-make $(GRADEFLAGS) && \
+	$(GRADER_DIR)/grade-lab-syscall --no-make $(GRADEFLAGS) && \
+	$(GRADER_DIR)/grade-lab-net --no-make $(GRADEFLAGS) && \
+	$(GRADER_DIR)/grade-lab-pgtbl --no-make $(GRADEFLAGS) && \
+	$(GRADER_DIR)/grade-lab-traps --no-make $(GRADEFLAGS) && \
+	$(GRADER_DIR)/grade-lab-cow --no-make $(GRADEFLAGS) && \
+	$(GRADER_DIR)/grade-lab-thread --no-make $(GRADEFLAGS) && \
+	$(GRADER_DIR)/grade-lab-lock --no-make $(GRADEFLAGS) && \
+	$(GRADER_DIR)/grade-lab-fs --no-make $(GRADEFLAGS) && \
+	$(GRADER_DIR)/grade-lab-mmap --no-make $(GRADEFLAGS)
 
-.PHONY: clean grade
+.PHONY: build image clean tags qemu qemu-net qemu-gdb qemu-gdb-net server ping print-gdbport \
+	grade $(addprefix grade-,$(GRADE_LABS)) smoke regression grade-all grade-all-heavy ph barrier

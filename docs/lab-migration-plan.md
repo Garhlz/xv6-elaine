@@ -22,7 +22,11 @@
 - 优先迁移“实验必需代码”，跳过 `.vscode/`、格式化、临时文件、测试产物。
 - 每整合一个实验，就单独提交并跑对应测试。
 - `net` 是 `dev/all` 的活动 lab 配置基线，其他实验功能在 `dev/all` 中无条件集成。
+- 当前构建产物已统一移入 `build/`：kernel 产物在 `build/kernel/`，user programs 在 `build/user/`，host-side tools 在 `build/mkfs/` 与 `build/notxv6/`，文件系统镜像为 `build/fs.img`。
+- 源码树下的旧路径产物（如 `kernel/kernel`、`user/_*`、`fs.img`、`ph`、`barrier`）只作为 `make clean` 清理对象保留。
 - 当前 `make grade-all` 已串联 `util → syscall → net → pgtbl → traps → cow → thread → lock → fs → mmap`，并复用一次统一构建产物。
+- 新的分层入口为 `make build`、`make image`、`make smoke`、`make regression`、`make grade-all-heavy`，其中 `./quick.sh` 仅作为 `make smoke` 的兼容包装。
+- `grade-lab-*` 脚本已统一放入 `graders/`；日常仍通过 `make grade-*`、`make smoke` 和 `make grade-all` 调用。
 
 ## 建议整合顺序
 

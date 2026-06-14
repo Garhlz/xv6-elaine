@@ -6,10 +6,10 @@
 
 - `kernel/`：内核代码，包含进程、页表、文件系统、驱动和网络栈。
 - `user/`：用户态程序与实验测试程序，例如 `nettests`。
-- `mkfs/`：构建 `fs.img` 的宿主机工具。
+- `mkfs/`：构建 `build/fs.img` 的宿主机工具源码。
 - `conf/`：实验配置。
 - `docs/`：整合记录、TODO 和后续工程化计划。
-- 根目录脚本：
+- `graders/`：课程 grader 脚本：
   - `grade-lab-util`
   - `grade-lab-syscall`
   - `grade-lab-net`
@@ -20,6 +20,7 @@
   - `grade-lab-lock`
   - `grade-lab-fs`
   - `grade-lab-mmap`
+- 根目录辅助脚本：
   - `gradelib.py`
   - `server.py`
   - `ping.py`
@@ -73,6 +74,10 @@ make grade
 ### 运行各实验及汇总评分
 
 ```bash
+make build
+make image
+make smoke
+make regression
 make grade-util
 make grade-syscall
 make grade-net
@@ -84,9 +89,10 @@ make grade-lock
 make grade-fs
 make grade-mmap
 make grade-all
+make grade-all-heavy
 ```
 
-`make grade-all` 会先统一清理并构建一次系统产物，然后依次运行 `util` → `syscall` → `net` → `pgtbl` → `traps` → `cow` → `thread` → `lock` → `fs` → `mmap` 的 grader；测试过程中仍会按用例重复启动 QEMU，但不会重复执行整仓库构建。
+`make build` 构建 kernel、user programs 和 host tools；`make image` 构建 `build/fs.img`。`make smoke` 是轻量提交前检查，`make regression` 是中等回归，`make grade-all-heavy` 是完整重型回归。`make grade-all` 继续保留课程完整回归语义，会先统一清理并构建一次系统产物，然后依次运行 `util` → `syscall` → `net` → `pgtbl` → `traps` → `cow` → `thread` → `lock` → `fs` → `mmap` 的 grader。
 
 ### net lab 手工测试
 
@@ -117,11 +123,11 @@ make ping
 
 ## 说明
 
-- `make grade` 会调用当前 `LAB` 对应的 grader；现在默认是 `grade-lab-net`。
+- `make grade` 会调用当前 `LAB` 对应的 grader；现在默认是 `graders/grade-lab-net`。
 - `make grade-util`、`make grade-syscall`、`make grade-net`、`make grade-pgtbl`、`make grade-traps`、`make grade-cow`、`make grade-thread`、`make grade-lock`、`make grade-fs`、`make grade-mmap`、`make grade-all` 适合 `dev/all` 分支上的阶段性回归验证。
-- 当前 `mmap` 集成已用 `make grade-mmap`、`make grade-cow`、`make grade-traps` 和 `./quick.sh` 验证通过；`grade-mmap` 额外覆盖了 `MAP_SHARED` 进程退出写回和 syscall buffer 指向 fresh mmap 页的 lazy fault-in。完整 `make grade-all` 属于重型回归，适合阶段性提交后单独运行。
+- 当前 `mmap` 集成已用 `make grade-mmap`、`make grade-cow`、`make grade-traps` 和 `make smoke` 验证通过；`grade-mmap` 额外覆盖了 `MAP_SHARED` 进程退出写回和 syscall buffer 指向 fresh mmap 页的 lazy fault-in。完整 `make grade-all` / `make grade-all-heavy` 属于重型回归，适合阶段性提交后单独运行。
 - 默认的 `make qemu` / `make qemu-gdb` 不启用宿主机到 xv6 的 UDP 端口转发；只有 `make qemu-net` / `make qemu-gdb-net` 会打开 `hostfwd=udp::$(FWDPORT)-:2000`，避免非网络实验的评分过程额外依赖端口绑定。
-- 生成文件如 `fs.img`、`kernel/kernel`、`*.o`、`*.asm`、`*.sym`、`packets.pcap` 不应当作为源码提交。
+- 生成文件统一放在 `build/` 下，例如 `build/fs.img`、`build/kernel/kernel`、`build/user/_sh`、`build/notxv6/ph`。旧路径生成物、`packets.pcap`、`xv6.out*` 不应当作为源码提交。
 - 当前仓库已经补充了 `clangd` / `clang-format` / `compile_commands.json` 相关配置，适合继续做代码阅读和实验回顾。
 
 ## 当前状态
@@ -135,11 +141,10 @@ make ping
 
 建议先做工程地基，再做内核语义增强：
 
-1. 重构 `Makefile`，把构建产物移到 `build/`，避免源码树和生成物混在一起。
-2. 整理 VM fault path，把 COW 和 mmap 缺页处理从 `trap.c` 中拆出清晰边界。
-3. 审计 mmap、fork、exec、exit 的资源生命周期和错误路径，尤其是完整 Unix mmap fork 语义和 exec 清理失败的两阶段处理。
-4. 把 `quick.sh` 正式并入 Makefile，形成 `make smoke` / `make regression` / `make grade-all-heavy` 等分层测试入口。
-5. 拆分完整 `usertests`，避免默认测试被 `MAXFILE` 和 `FSSIZE=200000` 放大成重型写盘回归。
+1. 整理 VM fault path，把 COW 和 mmap 缺页处理从 `trap.c` 中拆出清晰边界。
+2. 审计 mmap、fork、exec、exit 的资源生命周期和错误路径，尤其是完整 Unix mmap fork 语义和 exec 清理失败的两阶段处理。
+3. 继续扩展 `make smoke` / `make regression` / `make grade-all-heavy` 的测试分层，减少重复 QEMU 启动成本。
+4. 拆分完整 `usertests`，避免默认测试被 `MAXFILE` 和 `FSSIZE=200000` 放大成重型写盘回归。
 
 ## 测试建议
 
@@ -150,16 +155,17 @@ make ping
 适合小改动或先看是否能编译：
 
 ```bash
-make kernel/kernel
+make build
+make image
 ```
 
 如果想跑一套默认的轻量 smoke 回归，使用：
 
 ```bash
-./quick.sh
+make smoke
 ```
 
-它会统一构建一次，然后运行：
+它会统一构建一次 `build/fs.img`，然后运行：
 
 - `grade-lab-util`
 - `grade-lab-syscall`
@@ -169,7 +175,7 @@ make kernel/kernel
 - `symlinktest`
 - `mmaptest`
 
-它故意不包含 `bigfile`、`grade-lab-lock`、`grade-lab-fs` 和完整 `grade-all`。
+`./quick.sh` 仍可用，但现在只是委托 `make smoke`。smoke 故意不包含 `bigfile`、`grade-lab-lock`、`grade-lab-fs` 和完整 `grade-all`。
 
 ### 定向检查
 
@@ -181,6 +187,7 @@ make grade-net
 make grade-lock
 make grade-fs
 make grade-mmap
+make regression
 ```
 
 如果只想手工验证 `fs` 关键路径，优先跑：
@@ -202,6 +209,7 @@ bigfile
 
 ```bash
 make grade-all
+make grade-all-heavy
 ```
 
 说明：

@@ -4,6 +4,9 @@ import sys, os, re, time, socket, select, subprocess, errno, shutil, random, str
 from subprocess import check_call, Popen
 from optparse import OptionParser
 
+BUILD_DIR = os.environ.get("XV6_BUILD_DIR", "build")
+KERNEL_SYM = os.path.join(BUILD_DIR, "kernel", "kernel.sym")
+
 __all__ = []
 
 ##################################################################
@@ -243,8 +246,10 @@ def color(name, text):
     return text
 
 def reset_fs():
-    if os.path.exists("obj/fs/clean-fs.img"):
-        shutil.copyfile("obj/fs/clean-fs.img", "obj/fs/fs.img")
+    clean_fs = os.path.join(BUILD_DIR, "fs", "clean-fs.img")
+    fs_img = os.path.join(BUILD_DIR, "fs.img")
+    if os.path.exists(clean_fs):
+        shutil.copyfile(clean_fs, fs_img)
 
 def random_str(n=8):
     letters = string.ascii_letters + string.digits
@@ -509,7 +514,10 @@ Failed to shutdown QEMU.  You might need to 'killall qemu' or
         keyword arguments are as for run_qemu.  This runs on a disk
         snapshot unless the keyword argument 'snapshot' is False."""
 
-        maybe_unlink("obj/kern/init.o", "obj/kern/kernel")
+        maybe_unlink(
+            os.path.join(BUILD_DIR, "kernel", "init.o"),
+            os.path.join(BUILD_DIR, "kernel", "kernel"),
+        )
         if kw.pop("snapshot", True):
             kw.setdefault("make_args", []).append("QEMUEXTRA+=-snapshot")
         self.run_qemu(target_base="run-%s" % binary, *monitors, **kw)
@@ -555,7 +563,7 @@ def stop_breakpoint(addr):
 
     def setup_breakpoint(runner):
         if isinstance(addr, str):
-            addrs = [int(sym[:16], 16) for sym in open("kernel/kernel.sym")
+            addrs = [int(sym[:16], 16) for sym in open(KERNEL_SYM)
                      if sym[17:].strip() == addr]
             assert len(addrs), "Symbol %s not found" % addr
             runner.gdb.breakpoint(addrs[0])

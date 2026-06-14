@@ -2,13 +2,13 @@
 
 ## Project Structure & Module Organization
 
-This repository is the xv6 RISC-V teaching OS with the current lab set to `net` in `conf/lab.mk`. Kernel code lives in `kernel/`, user programs and tests live in `user/`, and the host-side filesystem image builder is in `mkfs/`. Lab configuration is under `conf/`; grading and helper scripts are at the root, including `grade-lab-net`, `gradelib.py`, `server.py`, and `ping.py`. Generated artifacts such as `fs.img`, `kernel/kernel`, `*.o`, `*.asm`, and `*.sym` should not be treated as source changes.
+This repository is the xv6 RISC-V teaching OS with the current lab set to `net` in `conf/lab.mk`. Kernel code lives in `kernel/`, user programs and tests live in `user/`, and the host-side filesystem image builder source is in `mkfs/`. Lab configuration is under `conf/`; grader scripts live in `graders/`, while helper scripts such as `gradelib.py`, `server.py`, and `ping.py` remain at the root. Generated artifacts live under `build/` and should not be treated as source changes.
 
 ## Build, Test, and Development Commands
 
-- `make qemu`: build xv6, create `fs.img`, and boot in QEMU.
+- `make qemu`: build xv6, create `build/fs.img`, and boot in QEMU.
 - `make qemu-gdb`: boot QEMU paused; run `gdb` in another terminal.
-- `make grade`: clean, rebuild, and run the active lab grader, currently `./grade-lab-net`.
+- `make grade`: clean, rebuild, and run the active lab grader, currently `graders/grade-lab-net`.
 - `make server`: start the UDP echo server used by the net lab grader.
 - `make ping`: send a host-side UDP ping to the forwarded xv6 port.
 - `make clean`: remove generated kernel, user, image, and debug artifacts.
