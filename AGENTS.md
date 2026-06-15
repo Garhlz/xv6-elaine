@@ -26,7 +26,7 @@ The repository uses layered test targets. Prefer the lightest target that covers
 - **Small / build-only changes**: `make build && make image`
 - **Before every commit**: `make test-smoke` (`make smoke` is now a compatibility alias)
 - **Subsystem changes**: `make test-<lab>` (e.g. `make test-mmap`, `make test-fs`) or `make grade-<lab>` for Python grader comparison
-- **Before merging**: `make regression` or `make grade-all-heavy` (full heavy suite)
+- **Stage/merge regression**: `make test-heavy` (only heavy cases) or `make grade-all-heavy` (full heavy suite)
 - **Network changes**: additionally run `make server`, `make qemu-net`, `make ping`, or `nettests` in xv6 shell
 - Legacy Python smoke remains available as `make smoke-py`; use `xv6test run --suite smoke --tags <tag>` for tag-filtered Go checks.
 

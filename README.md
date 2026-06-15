@@ -99,12 +99,14 @@ make test-mmap
 make test-net
 make test-lock
 make test-fs
+make test-usertests
+make test-heavy
 make test-all
 make grade-all
 make grade-all-heavy
 ```
 
-`make build` 构建 kernel、user programs 和 host tools；`make image` 构建 `build/fs.img`。`make test-smoke` 是默认轻量提交前检查，使用 Go host-side runner；`make smoke` 是兼容别名；`make smoke-py` 保留旧 Python smoke 对照入口；`make test-smoke-go` 是 `make test-smoke` 的兼容别名。`make test-thread`、`make test-cow`、`make test-traps`、`make test-mmap`、`make test-net`、`make test-lock`、`make test-fs` 是各子系统 Go runner 测试入口；`make test-all` 串联全部 suite。`make regression` 是中等回归，`make grade-all-heavy` 是完整重型回归。`make grade-all` 继续保留课程完整回归语义，会先统一清理并构建一次系统产物，然后依次运行 `util` → `syscall` → `net` → `pgtbl` → `traps` → `cow` → `thread` → `lock` → `fs` → `mmap` 的 grader。
+`make build` 构建 kernel、user programs 和 host tools；`make image` 构建 `build/fs.img`。`make test-smoke` 是默认轻量提交前检查，使用 Go host-side runner；`make smoke` 是兼容别名；`make smoke-py` 保留旧 Python smoke 对照入口；`make test-smoke-go` 是 `make test-smoke` 的兼容别名。`make test-thread`、`make test-cow`、`make test-traps`、`make test-mmap`、`make test-net`、`make test-lock`、`make test-fs` 是各子系统 Go runner 测试入口；`make test-usertests` 覆盖 19 个轻量 usertests subtest；`make test-heavy` 仅跑 heavy 标签 case（bigfile、完整 usertests 等）。`make test-all` 串联全部 suite。`make regression` 是中等回归，`make grade-all-heavy` 是完整重型回归。`make grade-all` 继续保留课程完整回归语义，会先统一清理并构建一次系统产物，然后依次运行 `util` → `syscall` → `net` → `pgtbl` → `traps` → `cow` → `thread` → `lock` → `fs` → `mmap` 的 grader。
 
 ### net lab 手工测试
 
@@ -156,8 +158,7 @@ make ping
 
 1. 整理 VM fault path，把 COW 和 mmap 缺页处理从 `trap.c` 中拆出清晰边界。
 2. 审计 mmap、fork、exec、exit 的资源生命周期和错误路径，尤其是完整 Unix mmap fork 语义和 exec 清理失败的两阶段处理。
-3. 继续推进 Go host-side runner，补齐 `HostOnly` 和更多 per-subsystem suite，在 `test-smoke` 稳定后逐步替换更多 legacy 入口。
-4. 拆分完整 `usertests`，避免默认测试被 `MAXFILE` 和 `FSSIZE=200000` 放大成重型写盘回归。
+3. 继续审计 mmap 边界、推进 kernel 模块拆分（VM fault path）和代码组织重构。
 
 ## 测试建议
 
@@ -178,7 +179,7 @@ make image
 make test-smoke
 ```
 
-`make smoke` 仍可用，但现在只是 `make test-smoke` 的兼容别名。默认 Go smoke 会统一构建一次 `build/fs.img`，然后运行 util、syscall、pgtbl、traps、net、fs、mmap 的轻量 case；其中 net smoke 默认只跑本地 UDP echo 路径，不依赖外网 DNS。
+`make smoke` 仍可用，但现在只是 `make test-smoke` 的兼容别名。默认 Go smoke 会统一构建一次 `build/fs.img`，然后运行 40 个轻量 case，覆盖 util、syscall、pgtbl、traps、thread、cow、net、fs、mmap 和 19 个 usertests subtest；net smoke 默认只跑本地 UDP echo 路径，不依赖外网 DNS。`make test-usertests` 单独跑 usertests 轻量 suite；`make test-heavy` 显式跑 heavy 标签 case。
 
 如果要和旧实现逐项对照，使用：
 
