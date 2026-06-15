@@ -23,7 +23,9 @@
 #define min(a, b) ((a) < (b) ? (a) : (b))
 // 通常每个磁盘设备应该有一个超级块，但 xv6 只支持单个设备
 struct superblock sb;
-static uint balloc_start; // 上次分配位置，用于加速连续查找
+// 分配 hint: 上次成功分配的位置，用于加速连续查找。
+// 仅作为性能优化，不参与正确性保证；真实空闲状态仍以 bitmap 为准。
+static uint balloc_start;
 
 // 从磁盘块 1 读取超级块到内存
 static void readsb(int dev, struct superblock *sb) {

@@ -224,7 +224,8 @@ static int alloc3_desc(int *desc_idx) {
 // is_write==1: 写磁盘块 (VIRTIO_BLK_T_OUT) — 设备从 buf->data 读取数据
 //
 // 每次操作构建一条 3 描述符链，提交给设备后睡眠等待中断完成。
-// 整个函数持有 disk.vdisk_lock 自旋锁——磁盘操作被串行化。
+// 注意: vdisk_lock 保护 descriptor 表、avail/used ring 和 info[] 等共享状态。
+// 等待 I/O 完成时 sleep() 会释放该锁，因此设备处理期间允许其他请求继续提交。
 void virtio_disk_rw(struct buf *buf, int is_write) {
     // 块号 (blockno) → 扇区号 (sector): BSIZE=1024B, 扇区=512B → 1 block = 2 sectors
     uint64 sector = buf->blockno * (BSIZE / 512);
