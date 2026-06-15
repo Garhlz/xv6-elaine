@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"xv6-labs-2021/internal/testrunner"
+	"xv6-labs-2021/tests/host/internal/testrunner"
 )
 
 func main() {

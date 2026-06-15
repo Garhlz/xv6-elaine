@@ -118,6 +118,8 @@ func runQEMUCase(tc Case, output *safeBuffer) error {
 
 	var transcript strings.Builder
 	nextCommand := 0
+	waitingForPrompt := true
+	waitingForSentinel := ""
 	sentAll := false
 	for {
 		select {
@@ -130,14 +132,29 @@ func runQEMUCase(tc Case, output *safeBuffer) error {
 			return fmt.Errorf("timeout after %s", tc.Timeout)
 		case chunk := <-events:
 			transcript.WriteString(chunk)
-			for strings.Contains(transcript.String(), "$ ") && nextCommand < len(tc.Commands) {
+			if waitingForPrompt && strings.Contains(transcript.String(), "$ ") {
 				transcript.Reset()
-				if _, err := fmt.Fprintln(stdin, tc.Commands[nextCommand]); err != nil {
+				waitingForPrompt = false
+				sentinel := commandSentinel(tc.Name, nextCommand)
+				if err := sendCommand(stdin, tc.Commands[nextCommand], sentinel); err != nil {
 					return err
 				}
+				waitingForSentinel = sentinel
 				nextCommand++
 			}
-			if nextCommand == len(tc.Commands) {
+			if waitingForSentinel != "" && sentinelReached(output.String(), waitingForSentinel) {
+				transcript.Reset()
+				waitingForSentinel = ""
+				if nextCommand < len(tc.Commands) {
+					sentinel := commandSentinel(tc.Name, nextCommand)
+					if err := sendCommand(stdin, tc.Commands[nextCommand], sentinel); err != nil {
+						return err
+					}
+					waitingForSentinel = sentinel
+					nextCommand++
+				}
+			}
+			if nextCommand == len(tc.Commands) && waitingForSentinel == "" {
 				sentAll = true
 				if outputMatches(tc, output.String()) {
 					return nil
@@ -145,6 +162,24 @@ func runQEMUCase(tc Case, output *safeBuffer) error {
 			}
 		}
 	}
+}
+
+func sendCommand(stdin io.Writer, command string, sentinel string) error {
+	if _, err := fmt.Fprintln(stdin, command); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(stdin, "echo %s\n", sentinel)
+	return err
+}
+
+func commandSentinel(caseName string, index int) string {
+	replacer := strings.NewReplacer("-", "_", ".", "_", "/", "_", " ", "_")
+	return fmt.Sprintf("__XV6TEST_DONE_%s_%d__", replacer.Replace(caseName), index)
+}
+
+func sentinelReached(text string, sentinel string) bool {
+	matched, _ := regexp.MatchString(`(?m)^(?:\$ )*`+regexp.QuoteMeta(sentinel)+`$`, text)
+	return matched
 }
 
 type safeBuffer struct {

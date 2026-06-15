@@ -82,7 +82,7 @@ TOOLPREFIX := $(shell if riscv64-unknown-elf-objdump -i 2>&1 | grep 'elf64-big' 
 endif
 
 QEMU = qemu-system-riscv64
-XV6TEST = GOCACHE=$(CURDIR)/$(BUILD)/go-cache go run ./cmd/xv6test
+XV6TEST = GOCACHE=$(CURDIR)/$(BUILD)/go-cache go run ./tests/host/cmd/xv6test
 
 CC = $(TOOLPREFIX)gcc
 AS = $(TOOLPREFIX)gas

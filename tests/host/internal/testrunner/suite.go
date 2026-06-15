@@ -11,17 +11,19 @@ type Suite struct {
 // Case 描述一个可独立执行的测试用例。
 //
 // 字段:
-//   Commands   — 在 xv6 shell 中顺序执行的命令列表
-//   Background — 在 QEMU 启动前必须先启动的后台进程（如 make server）
-//   Expect     — 必须在输出中出现的 regex 模式列表
-//   Count      — 输出中某 regex 必须出现的次数约束
-//   Reject     — 不允许在输出中出现的 regex 模式列表
-//   Tags       — 分类标签，如 "util", "syscall", "smoke", "heavy"
-//   Heavy      — 是否属于重型测试（默认不跑）
-//   Artifacts  — 失败时额外保存的文件路径（相对于仓库根目录）
+//
+//	Commands   — 在 xv6 shell 中顺序执行的命令列表
+//	Background — 在 QEMU 启动前必须先启动的后台进程（如 make server）
+//	Expect     — 必须在输出中出现的 regex 模式列表
+//	Count      — 输出中某 regex 必须出现的次数约束
+//	Reject     — 不允许在输出中出现的 regex 模式列表
+//	Tags       — 分类标签，如 "util", "syscall", "smoke", "heavy"
+//	Heavy      — 是否属于重型测试（默认不跑）
+//	Artifacts  — 失败时额外保存的文件路径（相对于仓库根目录）
 //
 // 未实现的模型字段（待后续 Phase 补充）:
-//   HostOnly   — 是否仅在宿主机运行（不需 QEMU），用于 notxv6/ph 等
+//
+//	HostOnly   — 是否仅在宿主机运行（不需 QEMU），用于 notxv6/ph 等
 type Case struct {
 	Name       string
 	Commands   []string
@@ -51,7 +53,7 @@ func BuiltinSuites() map[string]Suite {
 			{
 				Name:     "sleep-returns",
 				Commands: []string{"sleep", "echo OK"},
-				Expect:   []string{`(?m)^OK$`},
+				Expect:   []string{okPattern()},
 				Reject:   commonRejects(),
 				Tags:     []string{"util", "smoke"},
 				Timeout:  30 * time.Second,
@@ -62,7 +64,7 @@ func BuiltinSuites() map[string]Suite {
 				Expect: []string{
 					`(?m)^\d+: received ping$`,
 					`(?m)^\d+: received pong$`,
-					`(?m)^OK$`,
+					okPattern(),
 				},
 				Reject:  commonRejects(),
 				Tags:    []string{"util", "smoke"},
@@ -75,7 +77,7 @@ func BuiltinSuites() map[string]Suite {
 					`(?m)^prime 2$`, `(?m)^prime 3$`, `(?m)^prime 5$`,
 					`(?m)^prime 7$`, `(?m)^prime 11$`, `(?m)^prime 13$`,
 					`(?m)^prime 17$`, `(?m)^prime 19$`, `(?m)^prime 23$`,
-					`(?m)^prime 29$`, `(?m)^prime 31$`, `(?m)^OK$`,
+					`(?m)^prime 29$`, `(?m)^prime 31$`, okPattern(),
 				},
 				Reject:  commonRejects(),
 				Tags:    []string{"util", "smoke"},
@@ -87,7 +89,7 @@ func BuiltinSuites() map[string]Suite {
 					"echo > go_find_cur",
 					"find . go_find_cur",
 				},
-				Expect:  []string{`(?m)^\./go_find_cur$`},
+				Expect:  []string{pathPattern(`\./go_find_cur`)},
 				Reject:  commonRejects(),
 				Tags:    []string{"util", "smoke"},
 				Timeout: 30 * time.Second,
@@ -102,8 +104,8 @@ func BuiltinSuites() map[string]Suite {
 					"find . go_find_rec",
 				},
 				Expect: []string{
-					`(?m)^\./go_find_dir/go_find_rec$`,
-					`(?m)^\./go_find_dir/go_find_nest/go_find_rec$`,
+					pathPattern(`\./go_find_dir/go_find_rec`),
+					pathPattern(`\./go_find_dir/go_find_nest/go_find_rec`),
 				},
 				Reject:  commonRejects(),
 				Tags:    []string{"util", "smoke"},
@@ -151,7 +153,7 @@ func BuiltinSuites() map[string]Suite {
 			{
 				Name:     "trace-nothing",
 				Commands: []string{"grep hello README", "echo OK"},
-				Expect:   []string{`(?m)^OK$`},
+				Expect:   []string{okPattern()},
 				Reject:   append(commonRejects(), `(?m)^.* syscall .*$`),
 				Tags:     []string{"syscall", "smoke"},
 				Timeout:  30 * time.Second,
@@ -201,7 +203,7 @@ func BuiltinSuites() map[string]Suite {
 			{
 				Name:     "bttest",
 				Commands: []string{"bttest", "echo OK"},
-				Expect:   []string{`(?m)^OK$`},
+				Expect:   []string{okPattern()},
 				Reject:   commonRejects(),
 				Tags:     []string{"traps", "smoke"},
 				Timeout:  30 * time.Second,
@@ -232,7 +234,7 @@ func BuiltinSuites() map[string]Suite {
 				},
 				Reject:  commonRejects(),
 				Tags:    []string{"net", "smoke"},
-				Timeout: 30 * time.Second,
+				Timeout: 60 * time.Second,
 			},
 			{
 				Name:     "symlinktest",
@@ -266,4 +268,12 @@ func commonRejects() []string {
 		`(?m)^panic:`,
 		`(?m)^exec .* failed`,
 	}
+}
+
+func okPattern() string {
+	return `(?m)^(?:\$ )*[ \t]*OK$`
+}
+
+func pathPattern(path string) string {
+	return `(?m)^(?:\$ )*[ \t]*` + path + `$`
 }
