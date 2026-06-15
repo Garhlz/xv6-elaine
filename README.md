@@ -32,6 +32,7 @@
 - `riscv64-linux-gnu-gcc` / `riscv64-linux-gnu-ld`
 - `qemu-system-riscv64`
 - `python3`
+- `go`（用于当前并行迁移中的 Go host-side runner）
 
 如果使用仓库里的 VS Code 配置，建议安装：
 
@@ -77,6 +78,7 @@ make grade
 make build
 make image
 make smoke
+make test-smoke-go
 make regression
 make grade-util
 make grade-syscall
@@ -92,7 +94,7 @@ make grade-all
 make grade-all-heavy
 ```
 
-`make build` 构建 kernel、user programs 和 host tools；`make image` 构建 `build/fs.img`。`make smoke` 是轻量提交前检查，`make regression` 是中等回归，`make grade-all-heavy` 是完整重型回归。`make grade-all` 继续保留课程完整回归语义，会先统一清理并构建一次系统产物，然后依次运行 `util` → `syscall` → `net` → `pgtbl` → `traps` → `cow` → `thread` → `lock` → `fs` → `mmap` 的 grader。
+`make build` 构建 kernel、user programs 和 host tools；`make image` 构建 `build/fs.img`。`make smoke` 是当前稳定的 Python grader 轻量提交前检查；`make test-smoke-go` 是 Go host-side runner 的并行迁移入口，当前覆盖 18 个 smoke case，但暂不替代 `make smoke`。`make regression` 是中等回归，`make grade-all-heavy` 是完整重型回归。`make grade-all` 继续保留课程完整回归语义，会先统一清理并构建一次系统产物，然后依次运行 `util` → `syscall` → `net` → `pgtbl` → `traps` → `cow` → `thread` → `lock` → `fs` → `mmap` 的 grader。
 
 ### net lab 手工测试
 
@@ -136,6 +138,7 @@ make ping
 - `conf/lab.mk` 仍保持 `LAB=net`，用于保留 net 相关编译宏和 QEMU 网络配置；`dev/all` 的其他 lab 功能是无条件集成。
 - `docs/lab-migration-plan.md` 记录 lab 迁移历史和关键取舍。
 - `docs/TODO.md` 记录迁移完成后的工程化路线图。
+- `docs/test-migrate.md` 记录 Go host-side runner 迁移计划、当前 smoke 覆盖和 Python grader 对照策略。
 
 ## 后续开发重点
 
@@ -143,7 +146,7 @@ make ping
 
 1. 整理 VM fault path，把 COW 和 mmap 缺页处理从 `trap.c` 中拆出清晰边界。
 2. 审计 mmap、fork、exec、exit 的资源生命周期和错误路径，尤其是完整 Unix mmap fork 语义和 exec 清理失败的两阶段处理。
-3. 继续扩展 `make smoke` / `make regression` / `make grade-all-heavy` 的测试分层，减少重复 QEMU 启动成本。
+3. 继续推进 Go host-side runner，补齐 `qemuMode` / `HostOnly`，再评估将 `make smoke` 切换到 Go runner。
 4. 拆分完整 `usertests`，避免默认测试被 `MAXFILE` 和 `FSSIZE=200000` 放大成重型写盘回归。
 
 ## 测试建议
@@ -176,6 +179,14 @@ make smoke
 - `mmaptest`
 
 `./quick.sh` 仍可用，但现在只是委托 `make smoke`。smoke 故意不包含 `bigfile`、`grade-lab-lock`、`grade-lab-fs` 和完整 `grade-all`。
+
+如果想验证正在迁移中的 Go host-side runner，使用：
+
+```bash
+make test-smoke-go
+```
+
+当前 Go smoke runner 使用 per-case QEMU 和 per-command sentinel 判定命令完成，日志保存在 `build/test-logs/smoke/`。它覆盖 util、syscall、pgtbl、traps、net、fs、mmap 的 18 个 smoke case；其中 `nettests` 的 DNS 阶段依赖外部网络。
 
 ### 定向检查
 

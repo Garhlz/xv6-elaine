@@ -21,11 +21,25 @@ Follow `.editorconfig`: LF endings, final newline, spaces by default, 4-space in
 
 ## Testing Guidelines
 
-Use `make grade` before submitting lab work. For focused manual checks, run `make qemu` and execute xv6 commands such as `nettests` at the xv6 shell. The net lab grader starts `make server` and checks output patterns including ping, single-process pings, multi-process pings, and DNS. Keep test output deterministic; graders match exact lines.
+The repository uses layered test targets. Prefer the lightest target that covers your change:
+
+- **Small / build-only changes**: `make build && make image`
+- **Before every commit**: `make smoke` (stable Python grader smoke)
+- **Subsystem changes**: `make grade-<lab>` (e.g. `make grade-mmap`, `make grade-fs`)
+- **Before merging**: `make regression` or `make grade-all-heavy` (full heavy suite)
+- **Network changes**: additionally run `make server`, `make qemu-net`, `make ping`, or `nettests` in xv6 shell
+- Experimental Go runner: `make test-smoke-go`; use `xv6test run --suite smoke --tags <tag>` for tag-filtered checks.
+
+All graders live under `graders/`. Keep test output deterministic; graders match exact lines.
 
 ## Commit & Pull Request Guidelines
 
-Recent history uses short, imperative or descriptive commit subjects such as `finish lab net` and `fix ld warning: undefined symbol _entry`. Keep commits focused on one lab task or bug fix. Pull requests should state the lab or subsystem changed, summarize behavior, list validation commands run, and mention any known limitations. Include terminal output only when it helps explain a failure or non-obvious result.
+The commit format depends on the type of change:
+
+- **Lab migration commits**: use `feat(<lab>): integrate <lab> lab changes` followed by `- ` bullet points with no blank lines between them.
+- **Non-lab maintenance commits**: use short imperative subjects, e.g. `docs: refresh roadmap`, `build: move artifacts under build`, `refactor: modernize bio.c naming`.
+- Keep commits focused on one topic. Pull requests should state the subsystem changed, summarize behavior, list validation commands run, and mention any known limitations. Include terminal output only when it helps explain a failure or non-obvious result.
+- Do **not** add `Co-Authored-By: Claude`.
 
 ## Agent-Specific Instructions
 
@@ -47,15 +61,10 @@ When migrating a lab from its reference branch to `dev/all`:
 1. `git diff net..<lab> --name-only` to list the functional files for that lab.
 2. **Reference the original branch implementation** — use `git show <lab>:<file>` to read the exact working code from the lab branch. Copy its logic faithfully, especially subtle details like macro definitions and conditionals.
 3. Migrate only the **lab-specific functional code** — skip formatting noise, toolchain config (`.clang-format`, `.clangd`, `compile_commands.json`), and temporary files.
-3. Remove `#ifdef LAB_*` guards for the migrated lab; `dev/all` integrates all labs unconditionally.
-4. **Do not modify grader expectations** to match local file differences. Instead, add stable test data (e.g. the original `README` file) so the grader stays unchanged.
-5. Run the grader (`make grade-<lab>` or `make grade-all`) and confirm all tests pass.
-6. After all changes, sync the migration status in `docs/lab-migration-plan.md` and `README.md`.
-
-### Commit Format
-
-- Format: `feat(<lab>): integrate <lab> lab changes` followed by `- ` bullet points with **no blank lines** between them.
-- Do **not** add `Co-Authored-By: Claude`.
+4. Remove `#ifdef LAB_*` guards for the migrated lab; `dev/all` integrates all labs unconditionally.
+5. **Do not modify grader expectations** to match local file differences. Instead, add stable test data (e.g. the original `README` file) so the grader stays unchanged.
+6. Run the grader (`make grade-<lab>` or `make grade-all`) and confirm all tests pass.
+7. After all changes, sync the migration status in `docs/lab-migration-plan.md` and `README.md`.
 
 ### Grading Conventions
 

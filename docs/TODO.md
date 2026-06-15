@@ -6,9 +6,9 @@
 
 - 当前 `dev/all` 已整合 `util`、`syscall`、`pgtbl`、`traps`、`cow`、`thread`、`net`、`lock`、`fs`、`mmap`。
 - 当前活动 lab 配置仍是 `conf/lab.mk` 中的 `LAB=net`，用于保留 net 相关编译宏和 QEMU 网络配置；其他 lab 功能在 `dev/all` 中无条件集成。
-- 构建产物已统一输出到 `build/`，课程 grader 脚本已统一移动到 `graders/`，日常入口以 `make build`、`make image`、`make smoke`、`make regression`、`make grade-*` 为主。
+- 构建产物已统一输出到 `build/`，课程 grader 脚本已统一移动到 `graders/`，日常入口以 `make build`、`make image`、`make smoke`、`make regression`、`make grade-*` 为主；Go host-side runner 已作为并行入口接入 `make test-smoke-go`。
 - 迁移历史与各 lab 取舍记录在 `docs/lab-migration-plan.md`；本文件只跟踪迁移完成后的后续工作。
-- 最近一次工程基线验证包含 `make smoke`；完整重型回归仍应在阶段性合并前单独运行。
+- 最近一次测试迁移基线验证包含 `make test-smoke-go`，当前覆盖 18 个 smoke case；完整重型回归仍应在阶段性合并前单独运行。
 
 ## 2. 已完成内容
 
@@ -85,6 +85,21 @@
   - 完成内容：记录各 lab 迁移文件、验证方式和关键注意事项。
   - 验证方式：后续迁移事实变更时同步更新该文档。
 
+### 2.4 Go host-side runner 基线
+
+- [x] 建立 Go runner 并保留 Python grader 对照。
+  - 涉及模块：`tests/host/cmd/xv6test/`、`tests/host/internal/testrunner/`、`go.mod`、`Makefile`、`docs/test-migrate.md`。
+  - 完成内容：新增 `xv6test list` / `xv6test run`，支持 `--suite`、`--case`、`--tags`、`--log-dir`、`--timeout`；保留 `gradelib.py` 与 `graders/grade-lab-*` 作为 legacy 对照。
+  - 验证方式：`GOCACHE=/tmp/go-build-xv6test go test ./...`、`make test-smoke-go`。
+- [x] 迁移第一批 Go smoke case。
+  - 涉及模块：`tests/host/internal/testrunner/suite.go`。
+  - 完成内容：覆盖 util、syscall、pgtbl、traps、net、fs、mmap 的 18 个 smoke case，包括 `pingpong`、`primes`、`xargs`、`trace-*`、`pgtbltest`、`alarmtest`、`nettests`、`symlinktest`、`mmaptest`。
+  - 验证方式：`make test-smoke-go`，最近一次结果为 `suite smoke: 18 case(s), 0 failure(s)`。
+- [x] 稳定 QEMU 命令注入。
+  - 涉及模块：`tests/host/internal/testrunner/runner.go`、`docs/test-migrate.md`。
+  - 完成内容：使用 per-command sentinel 判定命令完成，prompt 只用于初始 shell 就绪；失败日志保存到 `build/test-logs/<suite>/<case>.log`。
+  - 验证方式：定向运行 `xargs`、`trace-children`、`mmaptest` 等多命令或长输出 case，并运行 `make test-smoke-go`。
+
 ## 3. 进行中 / 部分完成内容
 
 ### 3.1 VM fault path 整理
@@ -108,7 +123,7 @@
 ### 3.2 mmap 语义补强
 
 - [ ] 完善 mmap 参数校验。
-  - 当前状态：已检查 `length`、`fd`、文件类型、`MAP_SHARED` / `MAP_PRIVATE` 互斥、读写权限和 `mmap_top` 溢出；尚未看到对 `offset` 页对齐、非法 `prot` 位、非法 `flags` 位、非空 `addr` 策略的完整校验。
+  - 当前状态：已检查 `length`、`fd`、文件类型、`MAP_SHARED` / `MAP_PRIVATE` 互斥、读写权限和 `mmap_top` 溢出；`offset` 页对齐、非法 `prot` 位、非法 `flags` 位、非零 `addr` 策略仍需审计并补充校验。
   - 剩余工作：明确并实现 `offset % PGSIZE == 0`、`prot` 仅允许 `PROT_READ | PROT_WRITE | PROT_EXEC`、`flags` 仅允许当前支持的 mmap flags、`addr` 为非 0 时拒绝或文档化忽略。
   - 涉及模块：`kernel/sysfile.c`、`kernel/fcntl.h`、`user/mmaptest.c`。
   - 验证方式：新增 mmap 参数错误测试，运行 `make grade-mmap`。
@@ -135,16 +150,31 @@
 
 ### 3.3 测试分层继续完善
 
+- [ ] 完成 Go runner 与 Python smoke 的切换基线。
+  - 当前状态：`make test-smoke-go` 已覆盖 18 个 smoke case 并验证通过；`make smoke` 仍调用 Python grader 和 Python one-liner。
+  - 剩余工作：记录 Python smoke 与 Go smoke 的覆盖、耗时和不等价项；保留 `make smoke-py` 对照入口；确认后再将 `make smoke` 切到 Go runner。
+  - 涉及模块：`Makefile`、`tests/host/cmd/xv6test/`、`tests/host/internal/testrunner/`、`docs/test-migrate.md`、`README.md`。
+  - 验证方式：`make smoke`、`make test-smoke-go`，并检查没有残留 QEMU / `make server` 进程。
+- [ ] 补齐 Go runner 运行模式。
+  - 当前状态：所有 Go smoke case 仍走 QEMU；`nettests` 通过 `Background` 启动 `make server`；host-only `notxv6/ph`、`notxv6/barrier` 尚未纳入 Go runner。
+  - 剩余工作：实现 `QemuModeNormal`、`QemuModeNetForward`、`HostOnly`，让 net/thread 等 suite 不依赖隐式特判。
+  - 涉及模块：`tests/host/internal/testrunner/`、`Makefile`、`notxv6/`。
+  - 验证方式：`xv6test list --suite smoke --tags net`、后续 `make test-net`、`make test-thread`。
+- [ ] 拆分 net smoke 与外部 DNS 测试。
+  - 当前状态：Go `nettests` 兼容课程行为，DNS 阶段会访问 `8.8.8.8:53`，在受限网络或 CI 环境中可能不稳定。
+  - 剩余工作：将本地 UDP echo smoke 与外部 DNS 检查拆分到不同 tag 或 suite。
+  - 涉及模块：`tests/host/internal/testrunner/suite.go`、`user/nettests.c`、`docs/test-migrate.md`。
+  - 验证方式：本地 net smoke 不依赖公网 DNS，完整 net suite 仍覆盖 DNS。
 - [ ] 细化 `make regression` 的覆盖范围。
   - 当前状态：`make regression` 已存在，当前依赖 `smoke grade-mmap grade-cow grade-traps`。
   - 剩余工作：根据实际耗时决定是否加入 `grade-thread` 或定向 fs/lock 轻量项，同时避免默认触发 `bigfile` 和完整 `usertests`。
   - 涉及模块：`Makefile`、`graders/`、`README.md`。
   - 验证方式：记录 `make regression` 耗时，确认在日常开发可接受范围内。
-- [ ] 批量执行 xv6 命令以减少 QEMU 重启。
-  - 当前状态：多数 grader case 仍会通过 `Runner.run_qemu()` 启动独立 QEMU 实例；`make smoke` 中只有 `symlinktest`、`mmaptest` 用 Python one-liner 定向执行。
-  - 剩余工作：为轻量测试组增加单次 QEMU 启动执行多条 xv6 命令的 helper 或 Makefile 入口。
-  - 涉及模块：`gradelib.py`、`Makefile`、`graders/`。
-  - 验证方式：比较改造前后 `make smoke` 的总耗时和输出稳定性。
+- [ ] 评估 per-suite QEMU 复用。
+  - 当前状态：Go runner 默认 per-case QEMU，隔离性强但启动成本更高；当前完整 Go smoke 最近耗时约 43 秒。
+  - 剩余工作：仅对明确无状态污染的轻量 case 评估 per-suite QEMU 复用，避免文件系统状态污染和失败恢复复杂化。
+  - 涉及模块：`tests/host/internal/testrunner/runner.go`、`docs/test-migrate.md`。
+  - 验证方式：比较 per-case 与 per-suite 的耗时、日志质量和失败隔离效果。
 
 ## 4. 待完成内容
 
@@ -221,11 +251,11 @@
   - 涉及模块：`Makefile`、可能新增 `.github/workflows/` 或本地脚本、`README.md`。
   - 为什么要做：降低阶段性集成时漏跑关键验证的概率。
   - 如何验证：在干净 checkout 上执行自动化入口并记录耗时。
-- [ ] 评估是否迁移 grader 公共逻辑。
-  - 要做什么：在测试分层稳定后，再决定是否将 Python grader 公共逻辑重构或迁移为其他实现。
-  - 涉及模块：`gradelib.py`、`graders/`。
-  - 为什么要做：当前优先级应放在内核语义和测试覆盖；过早迁移 grader 语言会增加无关风险。
-  - 如何验证：只有在现有 Python grader 的维护成本成为瓶颈时再启动。
+- [ ] 归档 Python grader 并完成测试入口去评分化。
+  - 要做什么：在 Go runner 覆盖 smoke、per-subsystem 和 heavy suite 后，将 `gradelib.py` 与 `graders/grade-lab-*` 作为 legacy 对照归档，默认入口不再使用评分语义。
+  - 涉及模块：`gradelib.py`、`graders/`、`Makefile`、`README.md`、`docs/test-migrate.md`。
+  - 为什么要做：`dev/all` 已经不是课程 hand-in 分支，长期入口应是 `test-*` 而不是 `grade-*`。
+  - 如何验证：`make test-smoke`、`make test-regression`、`make test-heavy` 可覆盖日常与阶段性回归，README 不再推荐 `grade-*` 作为主要入口。
 
 ## 5. 测试与验证计划
 
