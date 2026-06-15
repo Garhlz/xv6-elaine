@@ -401,7 +401,15 @@ test-lock: $(KERNEL) image
 test-fs: $(KERNEL) image
 	$(XV6TEST) run --suite fs
 
-test-all: test-thread test-cow test-traps test-mmap test-net test-lock test-fs
+test-usertests: $(KERNEL) image
+	$(XV6TEST) run --suite usertests
+
+test-heavy: $(KERNEL) image
+	$(XV6TEST) run --suite lock --tags heavy
+	$(XV6TEST) run --suite fs --tags heavy
+	$(XV6TEST) run --suite usertests --tags heavy
+
+test-all: test-thread test-cow test-traps test-mmap test-net test-lock test-fs test-usertests
 
 regression: test-smoke grade-mmap grade-cow grade-traps
 
@@ -427,4 +435,4 @@ grade-all:
 
 .PHONY: build image clean tags qemu qemu-net qemu-gdb qemu-gdb-net server ping print-gdbport \
 	grade $(addprefix grade-,$(GRADE_LABS)) smoke smoke-py test-smoke test-smoke-go test-smoke-util test-smoke-syscall test-smoke-pgtbl test-smoke-traps test-smoke-net test-smoke-fs test-smoke-mmap test-smoke-cow test-smoke-thread \
-	test-thread test-cow test-traps test-mmap test-net test-lock test-fs test-all regression grade-all grade-all-heavy ph barrier
+	test-thread test-cow test-traps test-mmap test-net test-lock test-fs test-usertests test-heavy test-all regression grade-all grade-all-heavy ph barrier

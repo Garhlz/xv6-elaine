@@ -163,7 +163,11 @@
   - 剩余工作：后续可再决定将 DNS case 升级为独立 `net` suite。
   - 涉及模块：`tests/host/internal/testrunner/suite.go`、`user/nettests.c`、`docs/test-migrate.md`。
   - 验证方式：本地 net smoke 不依赖公网 DNS，DNS case 仍可单独运行。
-- [ ] 细化 `make regression` 的覆盖范围。
+- [x] 细化 `make regression` 的覆盖范围。
+t- [x] 拆分 usertests 与重型测试分层（Phase 4）。
+t  - 当前状态：19 个轻量 usertests subtest 已接入 smoke suite；`usertests-full`、`bigfile`、`sbrkmuch` 标为 heavy；无显式 `--tags` 时默认跳过 heavy 标签 case；新增 `test-usertests`、`test-heavy` 入口。
+t  - 涉及模块：`tests/host/internal/testrunner/suite.go`、`tests/host/cmd/xv6test/main.go`、`Makefile`。
+t  - 验证方式：`make test-smoke` 含 40 case 不跑 heavy，`make test-heavy` 仅跑 heavy。
   - 当前状态：`make regression` 已存在，当前依赖 `smoke grade-mmap grade-cow grade-traps`。
   - 剩余工作：根据实际耗时决定是否加入 `grade-thread` 或定向 fs/lock 轻量项，同时避免默认触发 `bigfile` 和完整 `usertests`。
   - 涉及模块：`Makefile`、`graders/`、`README.md`。

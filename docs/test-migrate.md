@@ -370,11 +370,12 @@ Python 到 Go 的 smoke 迁移对照：
 
 ### Phase 4：拆分 usertests 与重型测试
 
-- [ ] 梳理 `user/usertests.c` 中适合轻量化的 case。
-- [ ] 建立 `test-usertests-smoke` 或等价入口，只跑低成本 case。
-- [ ] 保留完整 `usertests` 在 heavy suite。
-- [ ] 将 `bigfile` 固定放入 heavy 或 fs-heavy suite。
-- [ ] 将 lock 全量压力项放入 heavy 或 lock-heavy suite。
+- [x] 梳理 `user/usertests.c` 中适合轻量化的 case。
+- [x] 建立 `test-usertests-smoke` 或等价入口，只跑低成本 case。
+- [x] 保留完整 `usertests` 在 heavy suite。
+- [x] 将 `bigfile` 固定放入 heavy 或 fs-heavy suite。
+- [x] 将 lock 全量压力项放入 heavy 或 lock-heavy suite。
+- [x] 实现 heavy tag 默认排除逻辑：无显式 `--tags` 时自动跳过 heavy 标签 case。
 
 建议分层：
 

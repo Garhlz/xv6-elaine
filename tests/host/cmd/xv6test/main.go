@@ -133,7 +133,11 @@ func run(args []string) {
 
 func selectCases(suite testrunner.Suite, caseList string, tags []string) ([]testrunner.Case, error) {
 	byName := make(map[string]bool)
-	filterByDefaultSmoke := caseList == "" && len(tags) == 0 && suite.Name == "smoke"
+	explicitFilter := caseList != "" || len(tags) > 0
+	if suite.Name == "smoke" && !explicitFilter {
+		tags = []string{"smoke"}
+		explicitFilter = true
+	}
 	if caseList != "" {
 		for _, name := range strings.Split(caseList, ",") {
 			name = strings.TrimSpace(name)
@@ -145,7 +149,8 @@ func selectCases(suite testrunner.Suite, caseList string, tags []string) ([]test
 
 	var selected []testrunner.Case
 	for _, tc := range suite.Cases {
-		if filterByDefaultSmoke && !matchTags(tc.Tags, []string{"smoke"}) {
+		// 无显式过滤时排除 heavy 标签的 case
+		if !explicitFilter && matchTags(tc.Tags, []string{"heavy"}) {
 			continue
 		}
 		// tag 过滤: 指定 tags 时，case 必须至少有一个匹配
