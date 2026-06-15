@@ -24,11 +24,11 @@ Follow `.editorconfig`: LF endings, final newline, spaces by default, 4-space in
 The repository uses layered test targets. Prefer the lightest target that covers your change:
 
 - **Small / build-only changes**: `make build && make image`
-- **Before every commit**: `make smoke` (stable Python grader smoke)
+- **Before every commit**: `make test-smoke` (`make smoke` is now a compatibility alias)
 - **Subsystem changes**: `make grade-<lab>` (e.g. `make grade-mmap`, `make grade-fs`)
 - **Before merging**: `make regression` or `make grade-all-heavy` (full heavy suite)
 - **Network changes**: additionally run `make server`, `make qemu-net`, `make ping`, or `nettests` in xv6 shell
-- Experimental Go runner: `make test-smoke-go`; use `xv6test run --suite smoke --tags <tag>` for tag-filtered checks.
+- Legacy Python smoke remains available as `make smoke-py`; use `xv6test run --suite smoke --tags <tag>` for tag-filtered Go checks.
 
 All graders live under `graders/`. Keep test output deterministic; graders match exact lines.
 

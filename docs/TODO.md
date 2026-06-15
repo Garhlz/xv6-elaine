@@ -6,9 +6,9 @@
 
 - 当前 `dev/all` 已整合 `util`、`syscall`、`pgtbl`、`traps`、`cow`、`thread`、`net`、`lock`、`fs`、`mmap`。
 - 当前活动 lab 配置仍是 `conf/lab.mk` 中的 `LAB=net`，用于保留 net 相关编译宏和 QEMU 网络配置；其他 lab 功能在 `dev/all` 中无条件集成。
-- 构建产物已统一输出到 `build/`，课程 grader 脚本已统一移动到 `graders/`，日常入口以 `make build`、`make image`、`make smoke`、`make regression`、`make grade-*` 为主；Go host-side runner 已作为并行入口接入 `make test-smoke-go`。
+- 构建产物已统一输出到 `build/`，课程 grader 脚本已统一移动到 `graders/`，日常入口以 `make build`、`make image`、`make test-smoke`、`make regression`、`make grade-*` 为主；`make smoke` / `make test-smoke-go` 目前保留为兼容别名，`make smoke-py` 保留旧 Python 对照入口。
 - 迁移历史与各 lab 取舍记录在 `docs/lab-migration-plan.md`；本文件只跟踪迁移完成后的后续工作。
-- 最近一次测试迁移基线验证包含 `make test-smoke-go`，当前覆盖 18 个 smoke case；完整重型回归仍应在阶段性合并前单独运行。
+- 当前 Go smoke 已覆盖 util、syscall、pgtbl、traps、net、fs、mmap 的默认轻量 case，并默认避开外网 DNS；完整重型回归仍应在阶段性合并前单独运行。
 
 ## 2. 已完成内容
 
@@ -90,15 +90,15 @@
 - [x] 建立 Go runner 并保留 Python grader 对照。
   - 涉及模块：`tests/host/cmd/xv6test/`、`tests/host/internal/testrunner/`、`go.mod`、`Makefile`、`docs/test-migrate.md`。
   - 完成内容：新增 `xv6test list` / `xv6test run`，支持 `--suite`、`--case`、`--tags`、`--log-dir`、`--timeout`；保留 `gradelib.py` 与 `graders/grade-lab-*` 作为 legacy 对照。
-  - 验证方式：`GOCACHE=/tmp/go-build-xv6test go test ./...`、`make test-smoke-go`。
+  - 验证方式：`GOCACHE=/tmp/go-build-xv6test go test ./...`、`make test-smoke`。
 - [x] 迁移第一批 Go smoke case。
   - 涉及模块：`tests/host/internal/testrunner/suite.go`。
   - 完成内容：覆盖 util、syscall、pgtbl、traps、net、fs、mmap 的 18 个 smoke case，包括 `pingpong`、`primes`、`xargs`、`trace-*`、`pgtbltest`、`alarmtest`、`nettests`、`symlinktest`、`mmaptest`。
-  - 验证方式：`make test-smoke-go`，最近一次结果为 `suite smoke: 18 case(s), 0 failure(s)`。
+  - 验证方式：`make test-smoke`，最近一次结果为 `suite smoke: 19 case(s), 0 failure(s)`。
 - [x] 稳定 QEMU 命令注入。
   - 涉及模块：`tests/host/internal/testrunner/runner.go`、`docs/test-migrate.md`。
-  - 完成内容：使用 per-command sentinel 判定命令完成，prompt 只用于初始 shell 就绪；失败日志保存到 `build/test-logs/<suite>/<case>.log`。
-  - 验证方式：定向运行 `xargs`、`trace-children`、`mmaptest` 等多命令或长输出 case，并运行 `make test-smoke-go`。
+  - 完成内容：使用 xv6 shell prompt 回到结尾位置判定命令完成；失败日志保存到 `build/test-logs/<suite>/<case>.log`。
+  - 验证方式：定向运行 `xargs`、`trace-children`、`mmaptest` 等多命令或长输出 case，并运行 `make test-smoke`。
 
 ## 3. 进行中 / 部分完成内容
 
@@ -150,21 +150,21 @@
 
 ### 3.3 测试分层继续完善
 
-- [ ] 完成 Go runner 与 Python smoke 的切换基线。
-  - 当前状态：`make test-smoke-go` 已覆盖 18 个 smoke case 并验证通过；`make smoke` 仍调用 Python grader 和 Python one-liner。
-  - 剩余工作：记录 Python smoke 与 Go smoke 的覆盖、耗时和不等价项；保留 `make smoke-py` 对照入口；确认后再将 `make smoke` 切到 Go runner。
+- [x] 完成 Go runner 与 Python smoke 的默认入口切换基线。
+  - 当前状态：`make test-smoke` 已作为默认轻量入口，`make smoke` / `make test-smoke-go` 作为兼容别名，`make smoke-py` 保留 Python 对照。
+  - 剩余工作：继续记录覆盖差异、耗时和少量不等价项，并观察默认 smoke 的稳定性。
   - 涉及模块：`Makefile`、`tests/host/cmd/xv6test/`、`tests/host/internal/testrunner/`、`docs/test-migrate.md`、`README.md`。
-  - 验证方式：`make smoke`、`make test-smoke-go`，并检查没有残留 QEMU / `make server` 进程。
+  - 验证方式：`make test-smoke`、`make smoke-py`，并检查没有残留 QEMU / `make server` 进程。
 - [ ] 补齐 Go runner 运行模式。
   - 当前状态：所有 Go smoke case 仍走 QEMU；`nettests` 通过 `Background` 启动 `make server`；host-only `notxv6/ph`、`notxv6/barrier` 尚未纳入 Go runner。
   - 剩余工作：实现 `QemuModeNormal`、`QemuModeNetForward`、`HostOnly`，让 net/thread 等 suite 不依赖隐式特判。
   - 涉及模块：`tests/host/internal/testrunner/`、`Makefile`、`notxv6/`。
   - 验证方式：`xv6test list --suite smoke --tags net`、后续 `make test-net`、`make test-thread`。
-- [ ] 拆分 net smoke 与外部 DNS 测试。
-  - 当前状态：Go `nettests` 兼容课程行为，DNS 阶段会访问 `8.8.8.8:53`，在受限网络或 CI 环境中可能不稳定。
-  - 剩余工作：将本地 UDP echo smoke 与外部 DNS 检查拆分到不同 tag 或 suite。
+- [x] 拆分 net smoke 与外部 DNS 测试。
+  - 当前状态：本地 UDP echo 路径保留在默认 smoke；DNS 检查已拆为非默认 case，可按标签单独运行。
+  - 剩余工作：后续可再决定将 DNS case 升级为独立 `net` suite。
   - 涉及模块：`tests/host/internal/testrunner/suite.go`、`user/nettests.c`、`docs/test-migrate.md`。
-  - 验证方式：本地 net smoke 不依赖公网 DNS，完整 net suite 仍覆盖 DNS。
+  - 验证方式：本地 net smoke 不依赖公网 DNS，DNS case 仍可单独运行。
 - [ ] 细化 `make regression` 的覆盖范围。
   - 当前状态：`make regression` 已存在，当前依赖 `smoke grade-mmap grade-cow grade-traps`。
   - 剩余工作：根据实际耗时决定是否加入 `grade-thread` 或定向 fs/lock 轻量项，同时避免默认触发 `bigfile` 和完整 `usertests`。

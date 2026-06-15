@@ -29,3 +29,5 @@ barrier
 *.pcap
 /xv6test
 /build/go-cache/
+.cache/
+/compile_commands.json

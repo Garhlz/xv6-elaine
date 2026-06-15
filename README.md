@@ -77,7 +77,9 @@ make grade
 ```bash
 make build
 make image
+make test-smoke
 make smoke
+make smoke-py
 make test-smoke-go
 make regression
 make grade-util
@@ -94,7 +96,7 @@ make grade-all
 make grade-all-heavy
 ```
 
-`make build` 构建 kernel、user programs 和 host tools；`make image` 构建 `build/fs.img`。`make smoke` 是当前稳定的 Python grader 轻量提交前检查；`make test-smoke-go` 是 Go host-side runner 的并行迁移入口，当前覆盖 18 个 smoke case，但暂不替代 `make smoke`。`make regression` 是中等回归，`make grade-all-heavy` 是完整重型回归。`make grade-all` 继续保留课程完整回归语义，会先统一清理并构建一次系统产物，然后依次运行 `util` → `syscall` → `net` → `pgtbl` → `traps` → `cow` → `thread` → `lock` → `fs` → `mmap` 的 grader。
+`make build` 构建 kernel、user programs 和 host tools；`make image` 构建 `build/fs.img`。`make test-smoke` 是默认轻量提交前检查，使用 Go host-side runner；`make smoke` 是兼容别名；`make smoke-py` 保留旧 Python smoke 对照入口；`make test-smoke-go` 是 `make test-smoke` 的兼容别名。`make regression` 是中等回归，`make grade-all-heavy` 是完整重型回归。`make grade-all` 继续保留课程完整回归语义，会先统一清理并构建一次系统产物，然后依次运行 `util` → `syscall` → `net` → `pgtbl` → `traps` → `cow` → `thread` → `lock` → `fs` → `mmap` 的 grader。
 
 ### net lab 手工测试
 
@@ -146,7 +148,7 @@ make ping
 
 1. 整理 VM fault path，把 COW 和 mmap 缺页处理从 `trap.c` 中拆出清晰边界。
 2. 审计 mmap、fork、exec、exit 的资源生命周期和错误路径，尤其是完整 Unix mmap fork 语义和 exec 清理失败的两阶段处理。
-3. 继续推进 Go host-side runner，补齐 `qemuMode` / `HostOnly`，再评估将 `make smoke` 切换到 Go runner。
+3. 继续推进 Go host-side runner，补齐 `HostOnly` 和更多 per-subsystem suite，在 `test-smoke` 稳定后逐步替换更多 legacy 入口。
 4. 拆分完整 `usertests`，避免默认测试被 `MAXFILE` 和 `FSSIZE=200000` 放大成重型写盘回归。
 
 ## 测试建议
@@ -165,28 +167,26 @@ make image
 如果想跑一套默认的轻量 smoke 回归，使用：
 
 ```bash
-make smoke
+make test-smoke
 ```
 
-它会统一构建一次 `build/fs.img`，然后运行：
+`make smoke` 仍可用，但现在只是 `make test-smoke` 的兼容别名。默认 Go smoke 会统一构建一次 `build/fs.img`，然后运行 util、syscall、pgtbl、traps、net、fs、mmap 的轻量 case；其中 net smoke 默认只跑本地 UDP echo 路径，不依赖外网 DNS。
 
-- `grade-lab-util`
-- `grade-lab-syscall`
-- `grade-lab-net`
-- `grade-lab-pgtbl`
-- `grade-lab-traps`
-- `symlinktest`
-- `mmaptest`
+如果要和旧实现逐项对照，使用：
+
+```bash
+make smoke-py
+```
 
 `./quick.sh` 仍可用，但现在只是委托 `make smoke`。smoke 故意不包含 `bigfile`、`grade-lab-lock`、`grade-lab-fs` 和完整 `grade-all`。
 
-如果想验证正在迁移中的 Go host-side runner，使用：
+如果想显式调用 Go smoke runner 的兼容入口，使用：
 
 ```bash
 make test-smoke-go
 ```
 
-当前 Go smoke runner 使用 per-case QEMU 和 per-command sentinel 判定命令完成，日志保存在 `build/test-logs/smoke/`。它覆盖 util、syscall、pgtbl、traps、net、fs、mmap 的 18 个 smoke case；其中 `nettests` 的 DNS 阶段依赖外部网络。
+当前 Go smoke runner 使用 per-case QEMU，并在每条命令完成后等待 xv6 shell prompt 回到结尾位置再推进下一条命令；日志保存在 `build/test-logs/smoke/`。默认 smoke 只运行带 `smoke` 标签的 case；`nettests` 的 DNS 检查已拆为非默认 case，可通过 `xv6test run --suite smoke --tags dns` 单独运行。
 
 ### 定向检查
 

@@ -337,7 +337,7 @@ endef
 
 $(foreach lab,$(GRADE_LABS),$(eval $(call GRADE_RULE,$(lab))))
 
-smoke: $(KERNEL) image
+smoke-py: $(KERNEL) image
 	$(GRADER_DIR)/grade-lab-util --no-make $(GRADEFLAGS)
 	$(GRADER_DIR)/grade-lab-syscall --no-make $(GRADEFLAGS)
 	$(GRADER_DIR)/grade-lab-net --no-make $(GRADEFLAGS)
@@ -346,8 +346,12 @@ smoke: $(KERNEL) image
 	python3 -c 'import types, gradelib; from gradelib import *; gradelib.options = types.SimpleNamespace(verbose=False, no_make=True, color="never"); r = Runner(); r.run_qemu(shell_script(["symlinktest"]), timeout=30); r.match("^test symlinks: ok$$"); r.match("^test concurrent symlinks: ok$$"); print("fs symlink smoke: OK")'
 	python3 -c 'import types, gradelib; from gradelib import *; gradelib.options = types.SimpleNamespace(verbose=False, no_make=True, color="never"); r = Runner(); r.run_qemu(shell_script(["mmaptest"]), timeout=60); r.match("^mmaptest: all tests succeeded$$"); print("mmap smoke: OK")'
 
-test-smoke-go: $(KERNEL) image
+test-smoke: $(KERNEL) image
 	$(XV6TEST) run --suite smoke
+
+smoke: test-smoke
+
+test-smoke-go: test-smoke
 
 test-smoke-util: $(KERNEL) image
 	$(XV6TEST) run --suite smoke --tags util
@@ -370,7 +374,7 @@ test-smoke-fs: $(KERNEL) image
 test-smoke-mmap: $(KERNEL) image
 	$(XV6TEST) run --suite smoke --tags mmap
 
-regression: smoke grade-mmap grade-cow grade-traps
+regression: test-smoke grade-mmap grade-cow grade-traps
 
 grade-all-heavy: grade-all
 
@@ -393,4 +397,4 @@ grade-all:
 	$(GRADER_DIR)/grade-lab-mmap --no-make $(GRADEFLAGS)
 
 .PHONY: build image clean tags qemu qemu-net qemu-gdb qemu-gdb-net server ping print-gdbport \
-	grade $(addprefix grade-,$(GRADE_LABS)) smoke test-smoke-go test-smoke-util test-smoke-syscall test-smoke-pgtbl test-smoke-traps test-smoke-net test-smoke-fs test-smoke-mmap regression grade-all grade-all-heavy ph barrier
+	grade $(addprefix grade-,$(GRADE_LABS)) smoke smoke-py test-smoke test-smoke-go test-smoke-util test-smoke-syscall test-smoke-pgtbl test-smoke-traps test-smoke-net test-smoke-fs test-smoke-mmap regression grade-all grade-all-heavy ph barrier

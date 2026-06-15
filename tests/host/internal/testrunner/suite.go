@@ -8,6 +8,14 @@ type Suite struct {
 	Cases []Case
 }
 
+type QemuMode int
+
+const (
+	QemuModeNormal QemuMode = iota
+	QemuModeNetForward
+	QemuModeHostOnly
+)
+
 // Case 描述一个可独立执行的测试用例。
 //
 // 字段:
@@ -30,11 +38,13 @@ type Case struct {
 	Background [][]string
 	Expect     []string
 	Count      []CountExpectation
+	Distinct   []DistinctExpectation
 	Reject     []string
 	Tags       []string
 	Heavy      bool
 	Artifacts  []string
 	Timeout    time.Duration
+	QemuMode   QemuMode
 }
 
 // CountExpectation 描述某 regex 模式在输出中应出现的次数。
@@ -45,80 +55,109 @@ type CountExpectation struct {
 	Min     int
 }
 
+// DistinctExpectation 描述某 regex 模式作为完整匹配项时至少应出现多少个不同值。
+type DistinctExpectation struct {
+	Pattern string
+	Min     int
+}
+
 // BuiltinSuites 返回所有内置测试套件。
 func BuiltinSuites() map[string]Suite {
 	smoke := Suite{
 		Name: "smoke",
 		Cases: []Case{
 			{
-				Name:     "sleep-returns",
-				Commands: []string{"sleep", "echo OK"},
-				Expect:   []string{okPattern()},
-				Reject:   commonRejects(),
-				Tags:     []string{"util", "smoke"},
-				Timeout:  30 * time.Second,
+				Name:       "sleep-no-arguments",
+				Commands:   []string{"sleep"},
+				Expect:     []string{`(?m)^usage: sleep ticks$`},
+				Reject:     commonRejects(),
+				Tags:       []string{"util", "smoke"},
+				Timeout:    30 * time.Second,
+				QemuMode:   QemuModeNormal,
 			},
 			{
-				Name:     "pingpong",
-				Commands: []string{"pingpong", "echo OK"},
+				Name:     "sleep-returns",
+				Commands: []string{"sleep; pingpong"},
 				Expect: []string{
 					`(?m)^\d+: received ping$`,
 					`(?m)^\d+: received pong$`,
-					okPattern(),
 				},
-				Reject:  commonRejects(),
-				Tags:    []string{"util", "smoke"},
-				Timeout: 30 * time.Second,
+				Reject:     commonRejects(),
+				Tags:       []string{"util", "smoke"},
+				Timeout:    30 * time.Second,
+				QemuMode:   QemuModeNormal,
+			},
+			{
+				Name:     "pingpong",
+				Commands: []string{"pingpong"},
+				Expect: []string{
+					`(?m)^\d+: received ping$`,
+					`(?m)^\d+: received pong$`,
+				},
+				Reject:   commonRejects(),
+				Tags:     []string{"util", "smoke"},
+				Timeout:  30 * time.Second,
+				QemuMode: QemuModeNormal,
 			},
 			{
 				Name:     "primes",
-				Commands: []string{"primes", "echo OK"},
+				Commands: []string{"primes"},
 				Expect: []string{
 					`(?m)^prime 2$`, `(?m)^prime 3$`, `(?m)^prime 5$`,
 					`(?m)^prime 7$`, `(?m)^prime 11$`, `(?m)^prime 13$`,
 					`(?m)^prime 17$`, `(?m)^prime 19$`, `(?m)^prime 23$`,
-					`(?m)^prime 29$`, `(?m)^prime 31$`, okPattern(),
+					`(?m)^prime 29$`, `(?m)^prime 31$`,
 				},
-				Reject:  commonRejects(),
-				Tags:    []string{"util", "smoke"},
-				Timeout: 30 * time.Second,
+				Reject:   commonRejects(),
+				Tags:     []string{"util", "smoke"},
+				Timeout:  30 * time.Second,
+				QemuMode: QemuModeNormal,
 			},
 			{
 				Name: "find-current-directory",
 				Commands: []string{
-					"echo > go_find_cur",
+					"cat README > go_find_cur",
 					"find . go_find_cur",
 				},
-				Expect:  []string{pathPattern(`\./go_find_cur`)},
-				Reject:  commonRejects(),
-				Tags:    []string{"util", "smoke"},
-				Timeout: 30 * time.Second,
+				Expect:   []string{pathPattern(`\./go_find_cur`)},
+				Reject:   commonRejects(),
+				Tags:     []string{"util", "smoke"},
+				Timeout:  30 * time.Second,
+				QemuMode: QemuModeNormal,
 			},
 			{
 				Name: "find-recursive",
 				Commands: []string{
 					"mkdir go_find_dir",
-					"echo > go_find_dir/go_find_rec",
+					"cat README > go_find_dir/go_find_rec",
 					"mkdir go_find_dir/go_find_nest",
-					"echo > go_find_dir/go_find_nest/go_find_rec",
+					"cat README > go_find_dir/go_find_nest/go_find_rec",
 					"find . go_find_rec",
 				},
 				Expect: []string{
 					pathPattern(`\./go_find_dir/go_find_rec`),
 					pathPattern(`\./go_find_dir/go_find_nest/go_find_rec`),
 				},
-				Reject:  commonRejects(),
-				Tags:    []string{"util", "smoke"},
-				Timeout: 30 * time.Second,
-			},
-			{
-				Name:     "xargs",
-				Commands: []string{"sh < xargstest.sh", "echo DONE"},
-				Expect:   []string{`(?m)^(?:\$ )*DONE$`},
-				Count:    []CountExpectation{{Pattern: `(?m)^(?:\$ )*hello$`, Exact: 3}},
 				Reject:   commonRejects(),
 				Tags:     []string{"util", "smoke"},
 				Timeout:  30 * time.Second,
+				QemuMode: QemuModeNormal,
+			},
+			{
+				Name: "xargs",
+				Commands: []string{
+					"mkdir go_xargs_a",
+					"mkdir go_xargs_c",
+					"cat README > go_xargs_a/b",
+					"cat README > go_xargs_c/b",
+					"cat README > b",
+					"find . b | xargs grep Version",
+				},
+				Count:    []CountExpectation{{Pattern: `(?m)^Version 6 \(v6\)\.  xv6 loosely follows the structure and style of v6,$`, Exact: 3}},
+				Reject:   commonRejects(),
+				Tags:     []string{"util", "smoke"},
+				Timeout:  30 * time.Second,
+				QemuMode: QemuModeNormal,
 			},
 			{
 				Name:     "trace-32-grep",
@@ -129,9 +168,10 @@ func BuiltinSuites() map[string]Suite {
 					`(?m)^\d+: syscall read -> 235$`,
 					`(?m)^\d+: syscall read -> 0$`,
 				},
-				Reject:  commonRejects(),
-				Tags:    []string{"syscall", "smoke"},
-				Timeout: 30 * time.Second,
+				Reject:   commonRejects(),
+				Tags:     []string{"syscall", "smoke"},
+				Timeout:  30 * time.Second,
+				QemuMode: QemuModeNormal,
 			},
 			{
 				Name:     "trace-all-grep",
@@ -146,26 +186,29 @@ func BuiltinSuites() map[string]Suite {
 					`(?m)^\d+: syscall read -> 0$`,
 					`(?m)^\d+: syscall close -> 0$`,
 				},
-				Reject:  commonRejects(),
-				Tags:    []string{"syscall", "smoke"},
-				Timeout: 30 * time.Second,
+				Reject:   commonRejects(),
+				Tags:     []string{"syscall", "smoke"},
+				Timeout:  30 * time.Second,
+				QemuMode: QemuModeNormal,
 			},
 			{
 				Name:     "trace-nothing",
-				Commands: []string{"grep hello README", "echo OK"},
-				Expect:   []string{okPattern()},
+				Commands: []string{"grep hello README"},
 				Reject:   append(commonRejects(), `(?m)^.* syscall .*$`),
 				Tags:     []string{"syscall", "smoke"},
 				Timeout:  30 * time.Second,
+				QemuMode: QemuModeNormal,
 			},
 			{
 				Name:     "trace-children",
 				Commands: []string{"trace 2 usertests forkforkfork"},
 				Expect:   []string{`(?m)^ALL TESTS PASSED$`},
 				Count:    []CountExpectation{{Pattern: `(?m)^\d+: syscall fork -> -?\d+$`, Min: 8}},
+				Distinct: []DistinctExpectation{{Pattern: `(?m)^\d+: syscall fork -> -?\d+$`, Min: 2}},
 				Reject:   commonRejects(),
 				Tags:     []string{"syscall", "smoke"},
 				Timeout:  60 * time.Second,
+				QemuMode: QemuModeNormal,
 			},
 			{
 				Name:     "sysinfotest",
@@ -174,6 +217,7 @@ func BuiltinSuites() map[string]Suite {
 				Reject:   append(commonRejects(), `(?m)^.* FAIL .*$`),
 				Tags:     []string{"syscall", "smoke"},
 				Timeout:  30 * time.Second,
+				QemuMode: QemuModeNormal,
 			},
 			{
 				Name:     "pgtbltest",
@@ -183,30 +227,31 @@ func BuiltinSuites() map[string]Suite {
 					`(?m)^pgaccess_test: OK$`,
 					`(?m)^pgtbltest: all tests succeeded$`,
 				},
-				Reject:  append(commonRejects(), `(?m)^pgtbltest: .* failed:`),
-				Tags:    []string{"pgtbl", "smoke"},
-				Timeout: 300 * time.Second,
+				Reject:   append(commonRejects(), `(?m)^pgtbltest: .* failed:`),
+				Tags:     []string{"pgtbl", "smoke"},
+				Timeout:  300 * time.Second,
+				QemuMode: QemuModeNormal,
 			},
 			{
 				Name:     "pte-printout",
-				Commands: []string{"echo hi"},
+				Commands: []string{"ls"},
 				Expect: []string{
-					`(?m)^hi$`,
 					`(?m)^page table 0x000000008[0-9a-f]+$`,
 					`(?m)^\.\.0: pte 0x[0-9a-f]+ pa 0x000000008[0-9a-f]+$`,
 					`(?m)^\.\. \.\. \.\.0: pte 0x[0-9a-f]+ pa 0x000000008[0-9a-f]+$`,
 				},
-				Reject:  commonRejects(),
-				Tags:    []string{"pgtbl", "smoke"},
-				Timeout: 30 * time.Second,
+				Reject:   commonRejects(),
+				Tags:     []string{"pgtbl", "smoke"},
+				Timeout:  30 * time.Second,
+				QemuMode: QemuModeNormal,
 			},
 			{
 				Name:     "bttest",
-				Commands: []string{"bttest", "echo OK"},
-				Expect:   []string{okPattern()},
+				Commands: []string{"bttest"},
 				Reject:   commonRejects(),
 				Tags:     []string{"traps", "smoke"},
 				Timeout:  30 * time.Second,
+				QemuMode: QemuModeNormal,
 			},
 			{
 				Name:     "alarmtest",
@@ -216,13 +261,14 @@ func BuiltinSuites() map[string]Suite {
 					`(?m)^\.*test1 passed$`,
 					`(?m)^\.*test2 passed$`,
 				},
-				Reject:  append(commonRejects(), `(?m)^.* failed.*$`),
-				Tags:    []string{"traps", "smoke"},
-				Timeout: 60 * time.Second,
+				Reject:   append(commonRejects(), `(?m)^.* failed.*$`),
+				Tags:     []string{"traps", "smoke"},
+				Timeout:  60 * time.Second,
+				QemuMode: QemuModeNormal,
 			},
 			{
-				Name:     "nettests",
-				Commands: []string{"nettests"},
+				Name:     "nettests-local",
+				Commands: []string{"nettests local"},
 				Background: [][]string{
 					{"make", "server"},
 				},
@@ -230,11 +276,25 @@ func BuiltinSuites() map[string]Suite {
 					`(?m)^testing ping: OK$`,
 					`(?m)^testing single-process pings: OK$`,
 					`(?m)^testing multi-process pings: OK$`,
-					`(?m)^DNS OK$`,
+					`(?m)^all tests passed\.$`,
 				},
-				Reject:  commonRejects(),
-				Tags:    []string{"net", "smoke"},
-				Timeout: 60 * time.Second,
+				Reject:   commonRejects(),
+				Tags:     []string{"net", "smoke"},
+				Timeout:  60 * time.Second,
+				QemuMode: QemuModeNetForward,
+			},
+			{
+				Name:     "nettests-dns",
+				Commands: []string{"nettests dns"},
+				Expect: []string{
+					`(?m)^testing DNS$`,
+					`(?m)^DNS OK$`,
+					`(?m)^all tests passed\.$`,
+				},
+				Reject:   commonRejects(),
+				Tags:     []string{"net", "dns"},
+				Timeout:  60 * time.Second,
+				QemuMode: QemuModeNetForward,
 			},
 			{
 				Name:     "symlinktest",
@@ -243,9 +303,10 @@ func BuiltinSuites() map[string]Suite {
 					`(?m)^test symlinks: ok$`,
 					`(?m)^test concurrent symlinks: ok$`,
 				},
-				Reject:  commonRejects(),
-				Tags:    []string{"fs", "smoke"},
-				Timeout: 30 * time.Second,
+				Reject:   commonRejects(),
+				Tags:     []string{"fs", "smoke"},
+				Timeout:  30 * time.Second,
+				QemuMode: QemuModeNormal,
 			},
 			{
 				Name:     "mmaptest",
@@ -254,6 +315,7 @@ func BuiltinSuites() map[string]Suite {
 				Reject:   append(commonRejects(), `(?m)^mmaptest: .* failed`),
 				Tags:     []string{"mmap", "smoke"},
 				Timeout:  60 * time.Second,
+				QemuMode: QemuModeNormal,
 			},
 		},
 	}
@@ -268,10 +330,6 @@ func commonRejects() []string {
 		`(?m)^panic:`,
 		`(?m)^exec .* failed`,
 	}
-}
-
-func okPattern() string {
-	return `(?m)^(?:\$ )*[ \t]*OK$`
 }
 
 func pathPattern(path string) string {

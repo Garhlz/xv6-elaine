@@ -37,7 +37,7 @@ func (r Runner) RunCase(suiteName string, tc Case) Result {
 	}
 
 	var output safeBuffer
-	err := runQEMUCase(tc, &output)
+	err := runCase(tc, &output)
 	if writeErr := os.WriteFile(logPath, output.Bytes(), 0o644); writeErr != nil && err == nil {
 		err = writeErr
 	}
@@ -48,6 +48,13 @@ func (r Runner) RunCase(suiteName string, tc Case) Result {
 	result.Duration = time.Since(start)
 	result.Err = err
 	return result
+}
+
+func runCase(tc Case, output *safeBuffer) error {
+	if tc.QemuMode == QemuModeHostOnly {
+		return fmt.Errorf("host-only cases are not implemented yet")
+	}
+	return runQEMUCase(tc, output)
 }
 
 func runQEMUCase(tc Case, output *safeBuffer) error {
@@ -61,7 +68,15 @@ func runQEMUCase(tc Case, output *safeBuffer) error {
 	}
 	defer stopBackground(background)
 
-	cmd := exec.Command("make", "--no-print-directory", "qemu", "QEMUEXTRA+=-snapshot")
+	qemuTarget := "qemu"
+	switch tc.QemuMode {
+	case QemuModeNetForward:
+		qemuTarget = "qemu-net"
+	case QemuModeHostOnly:
+		return fmt.Errorf("host-only cases are not implemented yet")
+	}
+
+	cmd := exec.Command("make", "--no-print-directory", qemuTarget, "QEMUEXTRA+=-snapshot")
 	cmd.SysProcAttr = processGroupAttr()
 
 	stdout, err := cmd.StdoutPipe()
@@ -119,7 +134,7 @@ func runQEMUCase(tc Case, output *safeBuffer) error {
 	var transcript strings.Builder
 	nextCommand := 0
 	waitingForPrompt := true
-	waitingForSentinel := ""
+	waitingForCommand := false
 	sentAll := false
 	for {
 		select {
@@ -135,26 +150,24 @@ func runQEMUCase(tc Case, output *safeBuffer) error {
 			if waitingForPrompt && strings.Contains(transcript.String(), "$ ") {
 				transcript.Reset()
 				waitingForPrompt = false
-				sentinel := commandSentinel(tc.Name, nextCommand)
-				if err := sendCommand(stdin, tc.Commands[nextCommand], sentinel); err != nil {
+				if err := sendCommand(stdin, tc.Commands[nextCommand]); err != nil {
 					return err
 				}
-				waitingForSentinel = sentinel
+				waitingForCommand = true
 				nextCommand++
 			}
-			if waitingForSentinel != "" && sentinelReached(output.String(), waitingForSentinel) {
+			if waitingForCommand && waitingForPromptCompletion(transcript.String()) {
 				transcript.Reset()
-				waitingForSentinel = ""
+				waitingForCommand = false
 				if nextCommand < len(tc.Commands) {
-					sentinel := commandSentinel(tc.Name, nextCommand)
-					if err := sendCommand(stdin, tc.Commands[nextCommand], sentinel); err != nil {
+					if err := sendCommand(stdin, tc.Commands[nextCommand]); err != nil {
 						return err
 					}
-					waitingForSentinel = sentinel
+					waitingForCommand = true
 					nextCommand++
 				}
 			}
-			if nextCommand == len(tc.Commands) && waitingForSentinel == "" {
+			if nextCommand == len(tc.Commands) && !waitingForCommand {
 				sentAll = true
 				if outputMatches(tc, output.String()) {
 					return nil
@@ -164,22 +177,13 @@ func runQEMUCase(tc Case, output *safeBuffer) error {
 	}
 }
 
-func sendCommand(stdin io.Writer, command string, sentinel string) error {
-	if _, err := fmt.Fprintln(stdin, command); err != nil {
-		return err
-	}
-	_, err := fmt.Fprintf(stdin, "echo %s\n", sentinel)
+func sendCommand(stdin io.Writer, command string) error {
+	_, err := fmt.Fprintln(stdin, command)
 	return err
 }
 
-func commandSentinel(caseName string, index int) string {
-	replacer := strings.NewReplacer("-", "_", ".", "_", "/", "_", " ", "_")
-	return fmt.Sprintf("__XV6TEST_DONE_%s_%d__", replacer.Replace(caseName), index)
-}
-
-func sentinelReached(text string, sentinel string) bool {
-	matched, _ := regexp.MatchString(`(?m)^(?:\$ )*`+regexp.QuoteMeta(sentinel)+`$`, text)
-	return matched
+func waitingForPromptCompletion(text string) bool {
+	return strings.HasSuffix(text, "$ ")
 }
 
 type safeBuffer struct {
@@ -282,6 +286,15 @@ func matchOutput(tc Case, text string) error {
 			return fmt.Errorf("pattern %q matched %d time(s), want at least %d", expectation.Pattern, count, expectation.Min)
 		}
 	}
+	for _, expectation := range tc.Distinct {
+		count, err := countDistinctMatches(expectation.Pattern, text)
+		if err != nil {
+			return err
+		}
+		if expectation.Min > 0 && count < expectation.Min {
+			return fmt.Errorf("pattern %q matched %d distinct value(s), want at least %d", expectation.Pattern, count, expectation.Min)
+		}
+	}
 	for _, pattern := range tc.Reject {
 		matched, err := regexp.MatchString(pattern, text)
 		if err != nil {
@@ -313,6 +326,15 @@ func outputMatches(tc Case, text string) bool {
 			return false
 		}
 	}
+	for _, expectation := range tc.Distinct {
+		count, err := countDistinctMatches(expectation.Pattern, text)
+		if err != nil {
+			return false
+		}
+		if expectation.Min > 0 && count < expectation.Min {
+			return false
+		}
+	}
 	return true
 }
 
@@ -322,6 +344,19 @@ func countMatches(pattern string, text string) (int, error) {
 		return 0, err
 	}
 	return len(re.FindAllStringIndex(text, -1)), nil
+}
+
+func countDistinctMatches(pattern string, text string) (int, error) {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return 0, err
+	}
+	matches := re.FindAllString(text, -1)
+	distinct := make(map[string]struct{}, len(matches))
+	for _, match := range matches {
+		distinct[match] = struct{}{}
+	}
+	return len(distinct), nil
 }
 
 func processGroupAttr() *syscall.SysProcAttr {

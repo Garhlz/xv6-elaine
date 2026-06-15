@@ -247,36 +247,56 @@ static void dns() {
 int main(int argc, char *argv[]) {
     int i, ret;
     uint16 dport = NET_TESTS_PORT;
+    int run_local = 1;
+    int run_dns = 1;
+
+    if (argc == 2) {
+        if (strcmp(argv[1], "local") == 0) {
+            run_dns = 0;
+        } else if (strcmp(argv[1], "dns") == 0) {
+            run_local = 0;
+        } else {
+            fprintf(2, "usage: nettests [local|dns]\n");
+            exit(1);
+        }
+    } else if (argc > 2) {
+        fprintf(2, "usage: nettests [local|dns]\n");
+        exit(1);
+    }
 
     printf("nettests running on port %d\n", dport);
 
-    printf("testing ping: ");
-    ping(2000, dport, 1);
-    printf("OK\n");
-
-    printf("testing single-process pings: ");
-    for (i = 0; i < 100; i++)
+    if (run_local) {
+        printf("testing ping: ");
         ping(2000, dport, 1);
-    printf("OK\n");
+        printf("OK\n");
 
-    printf("testing multi-process pings: ");
-    for (i = 0; i < 10; i++) {
-        int pid = fork();
-        if (pid == 0) {
-            ping(2000 + i + 1, dport, 1);
-            exit(0);
+        printf("testing single-process pings: ");
+        for (i = 0; i < 100; i++)
+            ping(2000, dport, 1);
+        printf("OK\n");
+
+        printf("testing multi-process pings: ");
+        for (i = 0; i < 10; i++) {
+            int pid = fork();
+            if (pid == 0) {
+                ping(2000 + i + 1, dport, 1);
+                exit(0);
+            }
         }
+        for (i = 0; i < 10; i++) {
+            wait(&ret);
+            if (ret != 0)
+                exit(1);
+        }
+        printf("OK\n");
     }
-    for (i = 0; i < 10; i++) {
-        wait(&ret);
-        if (ret != 0)
-            exit(1);
-    }
-    printf("OK\n");
 
-    printf("testing DNS\n");
-    dns();
-    printf("DNS OK\n");
+    if (run_dns) {
+        printf("testing DNS\n");
+        dns();
+        printf("DNS OK\n");
+    }
 
     printf("all tests passed.\n");
     exit(0);

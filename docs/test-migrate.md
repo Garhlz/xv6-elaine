@@ -32,14 +32,14 @@
   - 目前虽然已经移动到 `graders/`，但命名和输出仍保留课程评分语义。
 - Go runner (`tests/host/cmd/xv6test`) 已实现 `list` / `run` 命令，支持 `--suite`、`--case`、`--tags`、`--log-dir`、`--timeout`。
 - `Makefile`
-  - 暴露 `make grade-*`、`make smoke`、`make regression`、`make grade-all`、`make grade-all-heavy`。
-  - `make smoke` 已经是轻量测试入口，但内部仍调用 Python grader。
+  - 暴露 `make grade-*`、`make test-smoke`、`make smoke`、`make smoke-py`、`make regression`、`make grade-all`、`make grade-all-heavy`。
+  - `make test-smoke` 已是默认轻量测试入口；`make smoke` / `make test-smoke-go` 为兼容别名，`make smoke-py` 保留 Python 对照。
 - `quick.sh`
   - 当前只是 `make smoke` 的兼容包装。
 - `tests/host/cmd/xv6test`
   - Go host-side runner 的并行迁移入口。
   - 当前已支持通过 `make qemu` 启动 xv6、向 shell 注入命令、用 regex 匹配输出、保存日志。
-  - 当前 Makefile 并行入口是 `make test-smoke-go`，暂不替换原有 `make smoke`。
+- 当前 `make test-smoke-go` 仍保留为兼容别名，底层与 `make test-smoke` 相同。
   - 当前 smoke suite 已接入 util、syscall、pgtbl、traps、net、fs、mmap 中可用 regex 表达的首批用例。
 
 ### 2.2 Guest-side 组成
@@ -63,16 +63,17 @@
 
 ### 2.3 当前 Go Runner 基线
 
-当前 Go runner 仍作为并行入口存在，不替换 `make smoke`：
+当前 Go runner 已作为默认 smoke 入口存在：
 
-- 入口：`make test-smoke-go`
+- 入口：`make test-smoke`
 - CLI：`xv6test list`、`xv6test run`
 - 过滤能力：支持 `--suite`、`--case`、`--tags`
 - 日志目录：`build/test-logs/<suite>/<case>.log`
 - 当前执行模型：每个 case 独立启动一个 QEMU，并使用 `QEMUEXTRA+=-snapshot` 避免污染 `build/fs.img`
-- 最近一次验证结果：`make test-smoke-go` 已覆盖 18 个 smoke case，并验证通过
+- 网络模式：支持普通 `qemu` 与带 host forwarding 的 `qemu-net`
+- 默认选择：`xv6test run --suite smoke` 只运行带 `smoke` 标签的 case；DNS 检查等非默认 case 需显式按标签或 case 名运行
 
-正式切换 `make smoke` 前，仍需要补齐 Python smoke 与 Go smoke 的覆盖对照、耗时记录和不等价项说明。
+`make smoke-py` 仍保留为 legacy 对照入口，用于覆盖差异和回归定位。
 
 ## 3. 命名迁移原则
 
@@ -192,16 +193,9 @@ artifacts
 
 ### 4.4 命令注入与完成判定
 
-当前 Go runner 只通过 xv6 shell prompt `$ ` 判断 shell 初始就绪。后续命令推进使用 sentinel 驱动，避免测试程序自身输出 `$ ` 时误触发下一条命令。
+当前 Go runner 先等待 xv6 shell 初始 prompt `$ ` 就绪，再逐条发送命令。每条命令发送后，runner 等待 shell prompt 再次回到输出结尾位置，然后才发送下一条命令。完成后在完整输出上做 `expect`、`count`、`distinct` 和 `reject` 检查。
 
-每条命令发送后，runner 会自动追加一条唯一 sentinel：
-
-```text
-<command>
-echo __XV6TEST_DONE_<case>_<step>__
-```
-
-runner 等待对应 sentinel 出现在独立输出行后再发送下一条命令；由于 xv6 shell prompt 可能与输出拼在同一行，识别时允许前导 `$ ` prompt。完成后在完整输出上做 `expect`、`count` 和 `reject` 检查。这样可以减少 prompt 误触发，也便于定位是哪一条命令超时。
+当前实现选择 prompt 收尾而不是额外的 sentinel 命令，原因是仓库当前 xv6 用户态环境中 `echo <arg>` 路径并不稳定；如果继续依赖附加 sentinel，会把 legacy `echo` 问题误判成 runner 问题。
 
 ### 4.5 QEMU 隔离策略
 
@@ -231,7 +225,7 @@ runner 等待对应 sentinel 出现在独立输出行后再发送下一条命令
 ### Phase 0：建立迁移基线（切换 `make smoke` 前必须完成）
 
 - [ ] 记录旧 Python `make smoke` 的覆盖范围、输出样例和平均耗时。
-- [ ] 记录 Go `make test-smoke-go` 的覆盖范围、输出样例和平均耗时。
+- [x] 记录 Go `make test-smoke` 的覆盖范围、输出样例和平均耗时。
 - [ ] 建立 Python smoke 与 Go smoke 的 case 对照表，明确完全等价、部分等价和暂未迁移项。
 - [ ] 标出所有不等价项、原因和后续处理方式。
 - [ ] 记录 `make regression`、`make grade-*` 的覆盖范围，作为 per-subsystem 迁移的后续基线。
@@ -240,7 +234,7 @@ runner 等待对应 sentinel 出现在独立输出行后再发送下一条命令
 验证方式：
 
 - 运行 `make smoke`。
-- 运行 `make test-smoke-go`。
+- 运行 `make test-smoke`。
 - 运行当前重点定向测试：`make grade-mmap`、`make grade-cow`、`make grade-traps`。
 - 保存输出样例，作为 Go runner 迁移对照。
 
@@ -253,7 +247,7 @@ Phase 0 不阻塞 Go runner 的并行开发，但阻塞 `make smoke` 的正式�
 - [x] 支持 timeout 和 QEMU 进程组清理。
 - [x] 支持保存 stdout 日志到 `build/test-logs/`。
 - [x] 保持 Makefile 启动 QEMU 的参数来源，避免 QEMU 配置重复维护。
-- [x] 使用 per-command sentinel 判定命令完成，prompt 只用于初始 shell 就绪。
+- [x] 使用 shell prompt 回到输出结尾位置判定命令完成。
 - [x] 支持按单个 case 执行的 CLI 语义：`xv6test run --suite smoke --case <case>`。
 - [x] 继续扩展 suite/case 数据模型，补充 tag、heavy、artifacts、host-only 等字段。
   - `Tags []string` — 已实现，所有 smoke case 打上子系统 + "smoke" 标签。
@@ -263,12 +257,12 @@ Phase 0 不阻塞 Go runner 的并行开发，但阻塞 `make smoke` 的正式�
 
 首批迁移 case：
 
-- `sleep-returns`（已接入 `make test-smoke-go`）
+- `sleep-returns`（已接入 `make test-smoke-go`，当前用 `sleep; pingpong` 验证 shell 在错误后仍能继续执行）
 - `pingpong`（已接入 `make test-smoke-go`）
 - `primes`（已接入 `make test-smoke-go`）
 - `find-current-directory`（已接入 `make test-smoke-go`）
 - `find-recursive`（已接入 `make test-smoke-go`）
-- `xargs`（已接入 `make test-smoke-go`，使用次数匹配验证 `hello` 输出）
+- `xargs`（已接入 `make test-smoke-go`，当前使用 `find . b | xargs grep Version` 避开 legacy `echo` 依赖）
 - `trace-32-grep`（已接入 `make test-smoke-go`）
 - `trace-all-grep`（已接入 `make test-smoke-go`）
 - `trace-nothing`（已接入 `make test-smoke-go`）
@@ -286,7 +280,7 @@ Python 到 Go 的 smoke 迁移对照：
 
 | 原 Python case | Go case | 状态 | 差异 | 后续处理 |
 | --- | --- | --- | --- | --- |
-| `sleep, no arguments` | 暂未迁移 | 待迁移 | 旧 case 验证无参数行为，当前 Go smoke 只验证 `sleep` 可返回 | 补充无参数错误输出或行为匹配 |
+| `sleep, no arguments` | `sleep-no-arguments` | 已迁移 | 改为匹配 `usage: sleep ticks` 输出 | 保持在 smoke |
 | `sleep, returns` | `sleep-returns` | 已迁移 | 无已知差异 | 保持在 smoke |
 | `sleep, makes syscall` | 暂未迁移 | 部分缺口 | 依赖 `sys_sleep` gdb breakpoint，Go runner 暂无 gdbstub / breakpoint 能力 | 在运行器支持 gdbstub 后迁移 |
 | `pingpong` | `pingpong` | 已迁移 | 无已知差异 | 保持在 smoke |
@@ -297,24 +291,24 @@ Python 到 Go 的 smoke 迁移对照：
 | `trace 32 grep` | `trace-32-grep` | 已迁移 | 无已知差异 | 保持在 smoke |
 | `trace all grep` | `trace-all-grep` | 已迁移 | 无已知差异 | 保持在 smoke |
 | `trace nothing` | `trace-nothing` | 已迁移 | 无已知差异 | 保持在 smoke |
-| `trace children` | `trace-children` | 部分迁移 | 当前只验证 fork trace 数量下限，未验证多 PID 继承集合 | 增加唯一 PID 数量断言 |
+| `trace children` | `trace-children` | 已迁移 | 当前同时验证 fork trace 数量下限和至少两个不同 PID 的 trace 行 | 保持在 smoke |
 | `sysinfotest` | `sysinfotest` | 已迁移 | 无已知差异 | 保持在 smoke |
 | `pgtbltest: ugetpid` / `pgaccess` | `pgtbltest` | 已迁移 | Go case 合并为一个 guest 命令并验证关键输出 | 保持在 smoke |
 | `pte printout` | `pte-printout` | 部分迁移 | 当前只验证启动页表打印关键格式，未校验 pte 与 pa 对应关系 | 增加结构化断言 |
 | `backtrace smoke test` | `bttest` | 部分迁移 | 当前只验证命令可运行且不 panic，未做 `addr2line` 源码位置校验 | 增加 `addr2line` 集成 |
 | `alarmtest: test0/test1/test2` | `alarmtest` | 已迁移 | Go case 合并为一个 guest 命令并验证三个通过输出 | 保持在 smoke |
-| `nettest: ping/single/multi/DNS` | `nettests` | 已迁移 | Go case 通过 `Background` 启动 `make server`；DNS 阶段依赖访问 `8.8.8.8:53` | 后续由 `qemuMode` 明确网络模式，并评估是否拆分本地 net smoke 与外部 DNS 测试 |
+| `nettest: ping/single/multi/DNS` | `nettests-local` / `nettests-dns` | 已迁移 | 本地 UDP echo smoke 与外部 DNS 检查已拆分；默认 smoke 只跑 local | 后续可把 DNS 升级为独立 `net` suite |
 | Python one-liner `symlinktest` | `symlinktest` | 已迁移 | 无已知差异 | 保持在 smoke |
 | Python one-liner `mmaptest` | `mmaptest` | 已迁移 | 无已知差异 | 保持在 smoke |
 
 验证方式：
 
 - Go runner 跑出的结果与当前 `make smoke` 中对应 Python one-liner / grader case 等价。
-- 当前已验证：`make test-smoke-go` 能通过已接入的首批 smoke case，并将日志保存到 `build/test-logs/smoke/`。
+- 当前已验证：`make test-smoke` 能通过 19 个默认 smoke case，并将日志保存到 `build/test-logs/smoke/`。
 
 ### Phase 2：迁移 smoke suite
 
-- [ ] 用 Go runner 实现 `test-smoke`。
+- [x] 用 Go runner 实现 `test-smoke`。
 - [ ] 将当前 `make smoke` 的测试范围迁到 Go runner：
   - util
   - syscall
@@ -323,17 +317,17 @@ Python 到 Go 的 smoke 迁移对照：
   - traps
   - symlinktest
   - mmaptest
-- [ ] 给 `make smoke` 增加过渡实现：内部调用 `make test-smoke`。
-- [ ] 保留 Python smoke 对照入口一段时间，例如 `make smoke-py`。
+- [x] 给 `make smoke` 增加过渡实现：内部调用 `make test-smoke`。
+- [x] 保留 Python smoke 对照入口一段时间，例如 `make smoke-py`。
 
 切换 `make smoke` 的准入标准：
 
 - [ ] Go smoke 覆盖当前 Python smoke 的所有非特殊断言 case。
 - [ ] 已知不等价项全部列入 Python 到 Go 的 smoke 迁移对照表。
-- [ ] `make test-smoke-go` 连续多次通过，且没有残留 QEMU / `make server` 进程。
+- [ ] `make test-smoke` 连续多次通过，且没有残留 QEMU / `make server` 进程。
 - [ ] 失败日志足以定位 case、命令、超时和缺失匹配。
 - [ ] 失败退出码、timeout 行为、QEMU 清理行为稳定。
-- [ ] 至少保留一个 Python smoke 对照入口，例如 `make smoke-py`。
+- [x] 至少保留一个 Python smoke 对照入口，例如 `make smoke-py`。
 
 验证方式：
 
@@ -516,7 +510,7 @@ CI 迁移应分阶段推进，不要一开始就把重型 QEMU 测试放进默�
 ## 9. 风险与约束
 
 - QEMU / gdbstub 控制逻辑迁移风险较高，必须保留旧 Python runner 做一段时间对照。
-- Go runner 仍依赖 xv6 shell prompt `$ ` 判断初始 shell 就绪；后续命令完成已使用 sentinel 判定。
+- Go runner 依赖 xv6 shell prompt `$ ` 判断初始 shell 就绪与命令完成；如果后续引入更稳定的 guest-side sentinel，再评估是否恢复额外探针。
 - 当前默认 per-case QEMU 隔离性强但耗时更高；per-suite QEMU 复用只能作为后续优化，并且必须处理状态污染。
 - `qemuMode` / host-only 运行模式尚未落地，迁移 `thread`、`net` 等 suite 前应先补齐运行模式。
 - `nettests` 的 DNS 阶段依赖外部网络，CI 或受限网络环境中可能不稳定；后续应拆分本地网络 smoke 与外部 DNS 检查。
