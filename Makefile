@@ -374,6 +374,35 @@ test-smoke-fs: $(KERNEL) image
 test-smoke-mmap: $(KERNEL) image
 	$(XV6TEST) run --suite smoke --tags mmap
 
+test-smoke-cow: $(KERNEL) image
+	$(XV6TEST) run --suite smoke --tags cow
+
+test-smoke-thread: $(KERNEL) image
+	$(XV6TEST) run --suite smoke --tags thread
+
+test-thread: $(KERNEL) image $(PH) $(BARRIER)
+	$(XV6TEST) run --suite thread
+
+test-cow: $(KERNEL) image
+	$(XV6TEST) run --suite cow
+
+test-traps: $(KERNEL) image
+	$(XV6TEST) run --suite traps
+
+test-mmap: $(KERNEL) image
+	$(XV6TEST) run --suite mmap
+
+test-net: $(KERNEL) image
+	$(XV6TEST) run --suite net
+
+test-lock: $(KERNEL) image
+	$(XV6TEST) run --suite lock
+
+test-fs: $(KERNEL) image
+	$(XV6TEST) run --suite fs
+
+test-all: test-thread test-cow test-traps test-mmap test-net test-lock test-fs
+
 regression: test-smoke grade-mmap grade-cow grade-traps
 
 grade-all-heavy: grade-all
@@ -397,4 +426,5 @@ grade-all:
 	$(GRADER_DIR)/grade-lab-mmap --no-make $(GRADEFLAGS)
 
 .PHONY: build image clean tags qemu qemu-net qemu-gdb qemu-gdb-net server ping print-gdbport \
-	grade $(addprefix grade-,$(GRADE_LABS)) smoke smoke-py test-smoke test-smoke-go test-smoke-util test-smoke-syscall test-smoke-pgtbl test-smoke-traps test-smoke-net test-smoke-fs test-smoke-mmap regression grade-all grade-all-heavy ph barrier
+	grade $(addprefix grade-,$(GRADE_LABS)) smoke smoke-py test-smoke test-smoke-go test-smoke-util test-smoke-syscall test-smoke-pgtbl test-smoke-traps test-smoke-net test-smoke-fs test-smoke-mmap test-smoke-cow test-smoke-thread \
+	test-thread test-cow test-traps test-mmap test-net test-lock test-fs test-all regression grade-all grade-all-heavy ph barrier

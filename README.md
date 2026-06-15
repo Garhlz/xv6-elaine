@@ -92,11 +92,19 @@ make grade-thread
 make grade-lock
 make grade-fs
 make grade-mmap
+make test-thread
+make test-cow
+make test-traps
+make test-mmap
+make test-net
+make test-lock
+make test-fs
+make test-all
 make grade-all
 make grade-all-heavy
 ```
 
-`make build` 构建 kernel、user programs 和 host tools；`make image` 构建 `build/fs.img`。`make test-smoke` 是默认轻量提交前检查，使用 Go host-side runner；`make smoke` 是兼容别名；`make smoke-py` 保留旧 Python smoke 对照入口；`make test-smoke-go` 是 `make test-smoke` 的兼容别名。`make regression` 是中等回归，`make grade-all-heavy` 是完整重型回归。`make grade-all` 继续保留课程完整回归语义，会先统一清理并构建一次系统产物，然后依次运行 `util` → `syscall` → `net` → `pgtbl` → `traps` → `cow` → `thread` → `lock` → `fs` → `mmap` 的 grader。
+`make build` 构建 kernel、user programs 和 host tools；`make image` 构建 `build/fs.img`。`make test-smoke` 是默认轻量提交前检查，使用 Go host-side runner；`make smoke` 是兼容别名；`make smoke-py` 保留旧 Python smoke 对照入口；`make test-smoke-go` 是 `make test-smoke` 的兼容别名。`make test-thread`、`make test-cow`、`make test-traps`、`make test-mmap`、`make test-net`、`make test-lock`、`make test-fs` 是各子系统 Go runner 测试入口；`make test-all` 串联全部 suite。`make regression` 是中等回归，`make grade-all-heavy` 是完整重型回归。`make grade-all` 继续保留课程完整回归语义，会先统一清理并构建一次系统产物，然后依次运行 `util` → `syscall` → `net` → `pgtbl` → `traps` → `cow` → `thread` → `lock` → `fs` → `mmap` 的 grader。
 
 ### net lab 手工测试
 

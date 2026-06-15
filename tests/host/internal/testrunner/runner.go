@@ -52,9 +52,66 @@ func (r Runner) RunCase(suiteName string, tc Case) Result {
 
 func runCase(tc Case, output *safeBuffer) error {
 	if tc.QemuMode == QemuModeHostOnly {
-		return fmt.Errorf("host-only cases are not implemented yet")
+		return runHostOnlyCase(tc, output)
 	}
 	return runQEMUCase(tc, output)
+}
+
+func runHostOnlyCase(tc Case, output *safeBuffer) error {
+	if len(tc.HostCommand) == 0 {
+		return fmt.Errorf("host-only case %q has no HostCommand", tc.Name)
+	}
+	if tc.Timeout <= 0 {
+		tc.Timeout = 30 * time.Second
+	}
+
+	background, err := startBackground(tc.Background)
+	if err != nil {
+		return err
+	}
+	defer stopBackground(background)
+
+	cmd := exec.Command(tc.HostCommand[0], tc.HostCommand[1:]...)
+	cmd.SysProcAttr = processGroupAttr()
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	defer func() {
+		killProcessGroup(cmd)
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+		}
+	}()
+
+	go copyOutput(output, stdout)
+	go copyOutput(output, stderr)
+
+	timer := time.NewTimer(tc.Timeout)
+	defer timer.Stop()
+
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+		return fmt.Errorf("timeout after %s", tc.Timeout)
+	}
 }
 
 func runQEMUCase(tc Case, output *safeBuffer) error {
@@ -69,11 +126,8 @@ func runQEMUCase(tc Case, output *safeBuffer) error {
 	defer stopBackground(background)
 
 	qemuTarget := "qemu"
-	switch tc.QemuMode {
-	case QemuModeNetForward:
+	if tc.QemuMode == QemuModeNetForward {
 		qemuTarget = "qemu-net"
-	case QemuModeHostOnly:
-		return fmt.Errorf("host-only cases are not implemented yet")
 	}
 
 	cmd := exec.Command("make", "--no-print-directory", qemuTarget, "QEMUEXTRA+=-snapshot")
@@ -189,6 +243,12 @@ func waitingForPromptCompletion(text string) bool {
 type safeBuffer struct {
 	mu sync.Mutex
 	b  bytes.Buffer
+}
+
+func (b *safeBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.Write(p)
 }
 
 func (b *safeBuffer) WriteString(text string) {

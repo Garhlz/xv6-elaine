@@ -336,11 +336,11 @@ Python 到 Go 的 smoke 迁移对照：
 
 ### Phase 2.5：补齐运行模式
 
-- [ ] 实现 `QemuModeNormal`，用于默认 guest-side xv6 case。
-- [ ] 实现 `QemuModeNetForward`，用于需要网络转发或 host-side server 的 case。
-- [ ] 实现 `HostOnly`，用于不启动 QEMU 的宿主机侧测试，例如 `notxv6/ph`、`notxv6/barrier`。
-- [ ] 让 `nettests` 通过运行模式声明自动启动 `make server`，并明确使用带 host forwarding 的 QEMU 配置。
-- [ ] 让 `ph` / `barrier` 直接运行 host binary，不进入 xv6 shell。
+- [x] 实现 `QemuModeNormal`，用于默认 guest-side xv6 case。
+- [x] 实现 `QemuModeNetForward`，用于需要网络转发或 host-side server 的 case。
+- [x] 实现 `HostOnly`，用于不启动 QEMU 的宿主机侧测试，例如 `notxv6/ph`、`notxv6/barrier`。
+- [x] 让 `nettests` 通过运行模式声明自动启动 `make server`，并明确使用带 host forwarding 的 QEMU 配置。
+- [x] 让 `ph` / `barrier` 直接运行 host binary，不进入 xv6 shell。
 
 验证方式：
 
@@ -350,13 +350,13 @@ Python 到 Go 的 smoke 迁移对照：
 
 ### Phase 3：迁移 per-subsystem suite
 
-- [ ] 实现 `make test-mmap`，替代 `make grade-mmap` 的测试语义。
-- [ ] 实现 `make test-cow`。
-- [ ] 实现 `make test-traps`。
-- [ ] 实现 `make test-net`。
-- [ ] 实现 `make test-thread`，覆盖 host-only `notxv6/ph`、`notxv6/barrier` 和 guest `uthread`。
-- [ ] 实现 `make test-lock`。
-- [ ] 实现 `make test-fs`。
+- [x] 实现 `make test-mmap`，替代 `make grade-mmap` 的测试语义。
+- [x] 实现 `make test-cow`。
+- [x] 实现 `make test-traps`。
+- [x] 实现 `make test-net`。
+- [x] 实现 `make test-thread`，覆盖 host-only `notxv6/ph`、`notxv6/barrier` 和 guest `uthread`。
+- [x] 实现 `make test-lock`。
+- [x] 实现 `make test-fs`。
 
 迁移规则：
 

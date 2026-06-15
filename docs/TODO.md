@@ -155,12 +155,10 @@
   - 剩余工作：继续记录覆盖差异、耗时和少量不等价项，并观察默认 smoke 的稳定性。
   - 涉及模块：`Makefile`、`tests/host/cmd/xv6test/`、`tests/host/internal/testrunner/`、`docs/test-migrate.md`、`README.md`。
   - 验证方式：`make test-smoke`、`make smoke-py`，并检查没有残留 QEMU / `make server` 进程。
-- [ ] 补齐 Go runner 运行模式。
-  - 当前状态：所有 Go smoke case 仍走 QEMU；`nettests` 通过 `Background` 启动 `make server`；host-only `notxv6/ph`、`notxv6/barrier` 尚未纳入 Go runner。
-  - 剩余工作：实现 `QemuModeNormal`、`QemuModeNetForward`、`HostOnly`，让 net/thread 等 suite 不依赖隐式特判。
-  - 涉及模块：`tests/host/internal/testrunner/`、`Makefile`、`notxv6/`。
-  - 验证方式：`xv6test list --suite smoke --tags net`、后续 `make test-net`、`make test-thread`。
-- [x] 拆分 net smoke 与外部 DNS 测试。
+		- [x] 补齐 Go runner 运行模式。
+		  - 当前状态：`QemuModeNormal`、`QemuModeNetForward`、`HostOnly` 均已实现；`ph` / `barrier` 以 HostOnly 模式接入 `make test-thread`；per-subsystem suites（thread/cow/traps/mmap/net/lock/fs）已接入 Go runner。
+		  - 涉及模块：`tests/host/internal/testrunner/`、`Makefile`、`notxv6/`。
+		  - 验证方式：`xv6test list --suite smoke --tags net`、`make test-net`、`make test-thread`。
   - 当前状态：本地 UDP echo 路径保留在默认 smoke；DNS 检查已拆为非默认 case，可按标签单独运行。
   - 剩余工作：后续可再决定将 DNS case 升级为独立 `net` suite。
   - 涉及模块：`tests/host/internal/testrunner/suite.go`、`user/nettests.c`、`docs/test-migrate.md`。
