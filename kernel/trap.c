@@ -11,7 +11,7 @@ uint ticks;
 
 extern char trampoline[], uservec[], userret[];
 
-// in kernelvec.S, calls kerneltrap().
+// 在 kernelvec.S 中定义，调用 kerneltrap()。
 void kernelvec();
 
 extern int devintr();
@@ -20,60 +20,61 @@ void trapinit(void) {
     initlock(&tickslock, "time");
 }
 
-// set up to take exceptions and traps while in the kernel.
+// 配置内核态下的异常和 trap 入口。
 void trapinithart(void) {
     w_stvec((uint64)kernelvec);
 }
 
 //
-// handle an interrupt, exception, or system call from user space.
-// called from trampoline.S
+// 处理来自用户空间的中断、异常和系统调用。
+// 由 trampoline.S 调用。
 //
 void usertrap(void) {
     int which_dev = 0;
+    uint64 scause = r_scause();
+    uint64 stval = r_stval();
 
     if ((r_sstatus() & SSTATUS_SPP) != 0)
         panic("usertrap: not from user mode");
 
-    // send interrupts and exceptions to kerneltrap(),
-    // since we're now in the kernel.
+    // 现在已进入内核，将中断和异常导向 kerneltrap()。
     w_stvec((uint64)kernelvec);
 
     struct proc *p = myproc();
 
-    // save user program counter.
+    // 保存用户程序计数器。
     p->trapframe->epc = r_sepc();
 
-    if (r_scause() == 8) {
-        // system call
+    if (scause == 8) {
+        // 系统调用
 
         if (lockfree_read4(&p->killed))
             exit(-1);
 
-        // sepc points to the ecall instruction,
-        // but we want to return to the next instruction.
+        // sepc 指向 ecall 指令，需 +4 使其指向下一条。
         p->trapframe->epc += 4;
 
-        // an interrupt will change sstatus &c registers,
-        // so don't enable until done with those registers.
+        // 中断会修改 sstatus 等寄存器，用完这些寄存器再开中断。
         intr_on();
 
         syscall();
-    } else if (r_scause() == 13) {
-        if (mmap_fault(r_stval(), 0) < 0)
+    } else if (scause == 13) {
+        // 缺页异常（读），尝试 mmap 惰性装载。
+        if (mmap_fault(stval, 0) < 0)
             p->killed = 1;
-    } else if (r_scause() == 15) {
-        // COW page fault
-        uint64 va = PGROUNDDOWN(r_stval());
-        pagetable_t pagetable = p->pagetable;
-        if (va >= MAXVA) {
+    } else if (scause == 15) {
+        // 缺页异常（写）：可能是 COW、mmap 惰性装载或非法写入。
+        uint64 fault_page = PGROUNDDOWN(stval);
+        if (fault_page >= MAXVA) {
             p->killed = 1;
         } else {
-            pte_t *pte = walk(pagetable, va, 0);
-            if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0) {
-                if (mmap_fault(r_stval(), 1) < 0)
+            pte_t *pte = walk(p->pagetable, fault_page, 0);
+            int page_not_mapped = (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0);
+            if (page_not_mapped) {
+                if (mmap_fault(stval, 1) < 0)
                     p->killed = 1;
             } else if (*pte & PTE_COW) {
+                // COW 页面：引用计数为 1 则直接提权，否则复制。
                 uint64 pa = PTE2PA(*pte);
                 if (get_ref(pa) == 1) {
                     *pte &= ~PTE_COW;
@@ -93,23 +94,22 @@ void usertrap(void) {
                 }
                 sfence_vma();
             } else {
-                if (mmap_fault(r_stval(), 1) < 0)
+                if (mmap_fault(stval, 1) < 0)
                     p->killed = 1;
             }
         }
     } else if ((which_dev = devintr()) != 0) {
-        // ok
+        // 设备中断，已处理。
     } else {
-
-        printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
-        printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+        printf("usertrap(): unexpected scause %p pid=%d\n", scause, p->pid);
+        printf("            sepc=%p stval=%p\n", r_sepc(), stval);
         p->killed = 1;
     }
 
     if (lockfree_read4(&p->killed))
         exit(-1);
 
-    // give up the CPU if this is a timer interrupt.
+    // 如果是定时器中断，让出 CPU。
     if (which_dev == 2) {
         if (p->alarm_interval > 0) {
             if (p->alarm_ticks_left > 0)
@@ -128,50 +128,46 @@ void usertrap(void) {
 }
 
 //
-// return to user space
+// 返回用户空间
 //
 void usertrapret(void) {
     struct proc *p = myproc();
 
-    // we're about to switch the destination of traps from
-    // kerneltrap() to usertrap(), so turn off interrupts until
-    // we're back in user space, where usertrap() is correct.
+    // 即将把 trap 目标从 kerneltrap() 切换为 usertrap()，
+    // 先关中断，等回到用户空间后再由 usertrap() 打开。
     intr_off();
 
-    // send syscalls, interrupts, and exceptions to trampoline.S
+    // 让系统调用、中断和异常进入 trampoline.S。
     w_stvec(TRAMPOLINE + (uservec - trampoline));
 
-    // set up trapframe values that uservec will need when
-    // the process next re-enters the kernel.
-    p->trapframe->kernel_satp = r_satp();         // kernel page table
-    p->trapframe->kernel_sp = p->kstack + PGSIZE; // process's kernel stack
+    // 设置 trapframe 中 uservec 下次进入内核时需要的值。
+    p->trapframe->kernel_satp = r_satp();         // 内核页表
+    p->trapframe->kernel_sp = p->kstack + PGSIZE; // 进程内核栈
     p->trapframe->kernel_trap = (uint64)usertrap;
-    p->trapframe->kernel_hartid = r_tp(); // hartid for cpuid()
+    p->trapframe->kernel_hartid = r_tp(); // cpuid() 所需的 hartid
 
-    // set up the registers that trampoline.S's sret will use
-    // to get to user space.
+    // 设置寄存器，供 trampoline.S 的 sret 返回用户空间使用。
 
-    // set S Previous Privilege mode to User.
+    // 将 S 模式的特权级设回 User。
     unsigned long x = r_sstatus();
-    x &= ~SSTATUS_SPP; // clear SPP to 0 for user mode
-    x |= SSTATUS_SPIE; // enable interrupts in user mode
+    x &= ~SSTATUS_SPP; // 清除 SPP 以切回用户模式
+    x |= SSTATUS_SPIE; // 在用户模式下开启中断
     w_sstatus(x);
 
-    // set S Exception Program Counter to the saved user pc.
+    // 将异常程序计数器指向保存的用户 pc。
     w_sepc(p->trapframe->epc);
 
-    // tell trampoline.S the user page table to switch to.
+    // 告诉 trampoline.S 应切换到哪个用户页表。
     uint64 satp = MAKE_SATP(p->pagetable);
 
-    // jump to trampoline.S at the top of memory, which
-    // switches to the user page table, restores user registers,
-    // and switches to user mode with sret.
+    // 跳到内存顶端的 trampoline.S：切换用户页表、
+    // 恢复用户寄存器，并通过 sret 进入用户模式。
     uint64 fn = TRAMPOLINE + (userret - trampoline);
     ((void (*)(uint64, uint64))fn)(TRAPFRAME, satp);
 }
 
-// interrupts and exceptions from kernel code go here via kernelvec,
-// on whatever the current kernel stack is.
+// 内核代码产生的中断和异常通过 kernelvec 进入此处，
+// 运行在当前的任意内核栈上。
 void kerneltrap() {
     int which_dev = 0;
     uint64 sepc = r_sepc();
@@ -189,12 +185,12 @@ void kerneltrap() {
         panic("kerneltrap");
     }
 
-    // give up the CPU if this is a timer interrupt.
+    // 定时器中断时让出 CPU。
     if (which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING)
         yield();
 
-    // the yield() may have caused some traps to occur,
-    // so restore trap registers for use by kernelvec.S's sepc instruction.
+    // yield() 可能已触发其他 trap，
+    // 恢复 trap 相关寄存器，供 kernelvec.S 的 sret 指令使用。
     w_sepc(sepc);
     w_sstatus(sstatus);
 }
@@ -206,18 +202,15 @@ void clockintr() {
     release(&tickslock);
 }
 
-// check if it's an external interrupt or software interrupt,
-// and handle it.
-// returns 2 if timer interrupt,
-// 1 if other device,
-// 0 if not recognized.
+// 检查并处理外部中断或软件中断。
+// 返回 2 表示定时器中断，1 表示其他设备中断，0 表示未识别。
 int devintr() {
     uint64 scause = r_scause();
 
     if ((scause & 0x8000000000000000L) && (scause & 0xff) == 9) {
-        // this is a supervisor external interrupt, via PLIC.
+        // 来自 PLIC 的 S 模式外部中断。
 
-        // irq indicates which device interrupted.
+        // irq 表示哪个设备触发了中断。
         int irq = plic_claim();
 
         if (irq == UART0_IRQ) {
@@ -230,23 +223,20 @@ int devintr() {
             printf("unexpected interrupt irq=%d\n", irq);
         }
 
-        // the PLIC allows each device to raise at most one
-        // interrupt at a time; tell the PLIC the device is
-        // now allowed to interrupt again.
+        // PLIC 规定每个设备一次最多产生一个中断；
+        // 通知 PLIC 该设备可以再次中断。
         if (irq)
             plic_complete(irq);
 
         return 1;
     } else if (scause == 0x8000000000000001L) {
-        // software interrupt from a machine-mode timer interrupt,
-        // forwarded by timervec in kernelvec.S.
+        // 来自 M 模式定时器的软件中断，由 kernelvec.S 中的 timervec 转发。
 
         if (cpuid() == 0) {
             clockintr();
         }
 
-        // acknowledge the software interrupt by clearing
-        // the SSIP bit in sip.
+        // 通过清除 sip 中的 SSIP 位来确认软件中断。
         w_sip(r_sip() & ~2);
 
         return 2;
