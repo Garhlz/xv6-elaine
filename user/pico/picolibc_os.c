@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <fcntl.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -10,6 +11,13 @@
 #define XV6_T_DIR 1
 #define XV6_T_FILE 2
 #define XV6_T_DEVICE 3
+#define XV6_T_SYMLINK 4
+
+#define XV6_O_RDONLY 0x000
+#define XV6_O_WRONLY 0x001
+#define XV6_O_RDWR 0x002
+#define XV6_O_CREATE 0x200
+#define XV6_O_TRUNC 0x400
 
 struct xv6_stat {
     int dev;
@@ -22,6 +30,53 @@ struct xv6_stat {
 static int set_errno(int value) {
     errno = value;
     return -1;
+}
+
+static int to_xv6_open_flags(int flags) {
+    int xv6_flags;
+
+    switch (flags & O_ACCMODE) {
+    case O_WRONLY:
+        xv6_flags = XV6_O_WRONLY;
+        break;
+    case O_RDWR:
+        xv6_flags = XV6_O_RDWR;
+        break;
+    case O_RDONLY:
+    default:
+        xv6_flags = XV6_O_RDONLY;
+        break;
+    }
+
+    if (flags & O_CREAT)
+        xv6_flags |= XV6_O_CREATE;
+    if (flags & O_TRUNC)
+        xv6_flags |= XV6_O_TRUNC;
+
+    return xv6_flags;
+}
+
+static void copy_stat(struct stat *st, const struct xv6_stat *xs) {
+    memset(st, 0, sizeof(*st));
+    st->st_ino = xs->ino;
+    st->st_nlink = xs->nlink;
+    st->st_size = xs->size;
+
+    switch (xs->type) {
+    case XV6_T_DIR:
+        st->st_mode = S_IFDIR;
+        break;
+    case XV6_T_DEVICE:
+        st->st_mode = S_IFCHR;
+        break;
+    case XV6_T_SYMLINK:
+        st->st_mode = S_IFLNK;
+        break;
+    case XV6_T_FILE:
+    default:
+        st->st_mode = S_IFREG;
+        break;
+    }
 }
 
 void _exit(int status) {
@@ -65,6 +120,33 @@ int close(int fd) {
     return ret;
 }
 
+int open(const char *path, int flags, ...) {
+    int ret = __xv6_open(path, to_xv6_open_flags(flags));
+
+    if (ret < 0)
+        return set_errno(ENOENT);
+
+    return ret;
+}
+
+int unlink(const char *path) {
+    int ret = __xv6_unlink(path);
+
+    if (ret < 0)
+        return set_errno(ENOENT);
+
+    return ret;
+}
+
+int getpid(void) {
+    return __xv6_getpid();
+}
+
+int kill(int pid, int sig) {
+    (void)sig;
+    return __xv6_kill(pid);
+}
+
 void *sbrk(intptr_t incr) {
     void *ret;
 
@@ -98,29 +180,27 @@ int fstat(int fd, struct stat *st) {
     if (st == 0)
         return set_errno(EFAULT);
 
-    memset(st, 0, sizeof(*st));
-
     if (__xv6_fstat(fd, &xs) < 0)
         return set_errno(EBADF);
 
-    st->st_ino = xs.ino;
-    st->st_nlink = xs.nlink;
-    st->st_size = xs.size;
-
-    switch (xs.type) {
-    case XV6_T_DIR:
-        st->st_mode = S_IFDIR;
-        break;
-    case XV6_T_DEVICE:
-        st->st_mode = S_IFCHR;
-        break;
-    case XV6_T_FILE:
-    default:
-        st->st_mode = S_IFREG;
-        break;
-    }
-
+    copy_stat(st, &xs);
     return 0;
+}
+
+int stat(const char *path, struct stat *st) {
+    int fd;
+    int ret;
+
+    if (st == 0)
+        return set_errno(EFAULT);
+
+    fd = open(path, O_RDONLY);
+    if (fd < 0)
+        return -1;
+
+    ret = fstat(fd, st);
+    close(fd);
+    return ret;
 }
 
 ssize_t _write(int fd, const void *buf, size_t n) {
@@ -137,6 +217,10 @@ int _close(int fd) {
 
 int _fstat(int fd, struct stat *st) {
     return fstat(fd, st);
+}
+
+int _stat(const char *path, struct stat *st) {
+    return stat(path, st);
 }
 
 off_t _lseek(int fd, off_t offset, int whence) {

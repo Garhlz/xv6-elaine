@@ -9,6 +9,10 @@ SYSCALLS = [
     "close",
     "fstat",
     "sbrk",
+    "open",
+    "unlink",
+    "getpid",
+    "kill",
 ]
 
 

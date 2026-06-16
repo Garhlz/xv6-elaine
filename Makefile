@@ -188,7 +188,9 @@ PICO_OBJS = \
 	$(PICO_BUILD)/picolibc_os.o
 
 PICO_UPROGS = \
-	$(UBUILD)/_picohello
+	$(UBUILD)/_picohello \
+	$(UBUILD)/_picoio \
+	$(UBUILD)/_picostdio
 
 UPROGS = \
 	$(UBUILD)/_cat \
@@ -301,6 +303,12 @@ $(PICO_BUILD)/crt0.o: $(U)/pico/crt0.c | $(PICO_BUILD) check-picolibc
 $(PICO_BUILD)/picohello.o: $(U)/pico/picohello.c | $(PICO_BUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
 
+$(PICO_BUILD)/picoio.o: $(U)/pico/picoio.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
+$(PICO_BUILD)/picostdio.o: $(U)/pico/picostdio.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
 $(PICO_BUILD)/picolibc_os.o: $(U)/pico/picolibc_os.c | $(PICO_BUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
 
@@ -314,6 +322,16 @@ $(UBUILD)/_picohello: $(PICO_OBJS) $(PICO_BUILD)/picohello.o $(U)/pico/user_pico
 	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picohello.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
 	$(OBJDUMP) -S $@ > $(UBUILD)/picohello.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picohello.sym
+
+$(UBUILD)/_picoio: $(PICO_OBJS) $(PICO_BUILD)/picoio.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picoio.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/picoio.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picoio.sym
+
+$(UBUILD)/_picostdio: $(PICO_OBJS) $(PICO_BUILD)/picostdio.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picostdio.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/picostdio.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picostdio.sym
 
 $(UBUILD)/_%: $(UBUILD)/%.o $(XV6_ULIB) | $(UBUILD)
 	$(LD) $(LDFLAGS) -N -e _start -Ttext 0 -o $@ $^

@@ -10,5 +10,9 @@ int __xv6_write(int fd, const void *buf, int n);
 int __xv6_close(int fd);
 int __xv6_fstat(int fd, void *st);
 void *__xv6_sbrk(int n);
+int __xv6_open(const char *path, int flags);
+int __xv6_unlink(const char *path);
+int __xv6_getpid(void);
+int __xv6_kill(int pid);
 
 #endif
