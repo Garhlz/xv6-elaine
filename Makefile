@@ -153,7 +153,9 @@ $(KBUILD)/initcode: $(U)/initcode.S | $(KBUILD)
 tags: $(KOBJS) $(UBUILD)/_init
 	etags *.S *.c
 
-ULIB = $(UBUILD)/ulib.o $(UBUILD)/usys.o $(UBUILD)/printf.o $(UBUILD)/umalloc.o $(UBUILD)/statistics.o
+# 用户态最小 runtime：crt0 从 exec() 传入的 a0/a1 接住 argc/argv，
+# 再调用 main(argc, argv)，最后统一通过 exit() 返回内核。
+ULIB = $(UBUILD)/crt0_entry.o $(UBUILD)/crt0.o $(UBUILD)/ulib.o $(UBUILD)/usys.o $(UBUILD)/printf.o $(UBUILD)/umalloc.o $(UBUILD)/statistics.o
 
 UPROGS = \
 	$(UBUILD)/_cat \
@@ -212,18 +214,18 @@ $(UBUILD)/usys.o: $(UBUILD)/usys.S | $(UBUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(UBUILD)/_%: $(UBUILD)/%.o $(ULIB) | $(UBUILD)
-	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $^
+	$(LD) $(LDFLAGS) -N -e _start -Ttext 0 -o $@ $^
 	$(OBJDUMP) -S $@ > $(UBUILD)/$*.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/$*.sym
 
 $(UBUILD)/_forktest: $(UBUILD)/forktest.o $(ULIB) | $(UBUILD)
 	# forktest has less library code linked in - needs to be small
 	# in order to be able to max out the proc table.
-	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $(UBUILD)/forktest.o $(UBUILD)/ulib.o $(UBUILD)/usys.o
+	$(LD) $(LDFLAGS) -N -e _start -Ttext 0 -o $@ $(UBUILD)/forktest.o $(UBUILD)/crt0_entry.o $(UBUILD)/crt0.o $(UBUILD)/ulib.o $(UBUILD)/usys.o
 	$(OBJDUMP) -S $@ > $(UBUILD)/forktest.asm
 
 $(UBUILD)/_uthread: $(UBUILD)/uthread.o $(UBUILD)/uthread_switch.o $(ULIB) | $(UBUILD)
-	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $@ $(UBUILD)/uthread.o $(UBUILD)/uthread_switch.o $(ULIB)
+	$(LD) $(LDFLAGS) -N -e _start -Ttext 0 -o $@ $(UBUILD)/uthread.o $(UBUILD)/uthread_switch.o $(ULIB)
 	$(OBJDUMP) -S $@ > $(UBUILD)/uthread.asm
 
 $(MKFS): mkfs/mkfs.c $(K)/fs.h $(K)/param.h | $(MKFSBUILD)

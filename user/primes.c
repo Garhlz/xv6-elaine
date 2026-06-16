@@ -44,7 +44,7 @@ static void run_stage(int input_fd) {
     exit(0);
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
     int i;
     int p[2];
 

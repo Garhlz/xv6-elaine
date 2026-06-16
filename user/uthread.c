@@ -147,7 +147,7 @@ static void thread_c(void) {
     thread_schedule();
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
     a_started = b_started = c_started = 0;
     a_n = b_n = c_n = 0;
     thread_init();

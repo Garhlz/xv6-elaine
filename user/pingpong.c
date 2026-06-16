@@ -2,7 +2,7 @@
 #include "kernel/stat.h"
 #include "user/user.h"
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
     char buf[8];
     int parent_to_child[2];
     int child_to_parent[2];

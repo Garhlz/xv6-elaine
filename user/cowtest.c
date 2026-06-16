@@ -171,7 +171,7 @@ void filetest() {
     printf("ok\n");
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
     simpletest();
 
     // check that the first simpletest() freed the physical memory.

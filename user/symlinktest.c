@@ -21,7 +21,7 @@ static void testsymlink(void);
 static void concur(void);
 static void cleanup(void);
 
-int main(void) {
+int main(int argc, char **argv) {
     cleanup();
     testsymlink();
     concur();

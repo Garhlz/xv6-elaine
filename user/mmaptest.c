@@ -14,7 +14,7 @@ char buf[BSIZE];
 
 #define MAP_FAILED ((char *)-1)
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
     mmap_test();
     fork_test();
     shared_exit_writeback_test();

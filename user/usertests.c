@@ -2664,7 +2664,7 @@ int run(void f(char *), char *s) {
     }
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
     int continuous = 0;
     char *justone = 0;
 

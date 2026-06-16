@@ -7,7 +7,7 @@
 void ugetpid_test();
 void pgaccess_test();
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
     ugetpid_test();
     pgaccess_test();
     printf("pgtbltest: all tests succeeded\n");

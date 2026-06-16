@@ -18,7 +18,7 @@ void test2();
 void periodic();
 void slow_handler();
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
     test0();
     test1();
     test2();

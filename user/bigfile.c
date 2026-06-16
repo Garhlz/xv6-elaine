@@ -4,7 +4,7 @@
 #include "kernel/fcntl.h"
 #include "kernel/fs.h"
 
-int main() {
+int main(int argc, char **argv) {
     char buf[BSIZE];
     int fd, i, blocks;
 

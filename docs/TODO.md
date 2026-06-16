@@ -95,6 +95,10 @@
   - 涉及模块：`tests/host/cmd/xv6test/`、`tests/host/internal/testrunner/`、`go.mod`、`Makefile`、`docs/test-migrate.md`。
   - 完成内容：新增 `xv6test list` / `xv6test run`，支持 `--suite`、`--case`、`--tags`、`--log-dir`、`--timeout`；保留 `gradelib.py` 与 `graders/grade-lab-*` 作为 legacy 对照。
   - 验证方式：`GOCACHE=/tmp/go-build-xv6test go test ./...`、`make test-smoke`。
+- [x] 建立最小用户态运行时入口（`crt0`）。
+  - 涉及模块：`user/crt0_entry.S`、`user/crt0.c`、`Makefile`、多个 `user/*.c`。
+  - 完成内容：新增 `_start -> crt0_main() -> main(argc, argv) -> exit(status)` 的最小启动路径；用户程序 ELF entry 统一改为 `_start`；用户程序 `main` 签名统一为 `int main(int argc, char **argv)`。
+  - 验证方式：`make build`、`make image`、`make test-quick`。
 - [x] 迁移第一批 Go smoke case。
   - 涉及模块：`tests/host/internal/testrunner/suite.go`。
   - 完成内容：覆盖 util、syscall、pgtbl、traps、net、fs、mmap 的 18 个 smoke case，包括 `pingpong`、`primes`、`xargs`、`trace-*`、`pgtbltest`、`alarmtest`、`nettests`、`symlinktest`、`mmaptest`。
@@ -223,15 +227,10 @@ t  - 验证方式：`make test-smoke` 含 40 case 不跑 heavy，`make test-heav
 
 ### 4.2 中期任务
 
-- [ ] 建立稳定的用户态运行时入口（`crt0`）。
-  - 要做什么：明确 `_start -> main -> exit` 的最小启动路径，整理参数传递、返回值退出和 `user/usys.S` / `usys.pl` / `ulib` 之间的职责边界。
-  - 涉及模块：`user/` 启动汇编、`user/usys.pl`、`user/ulib.c`、`user/user.h`、`Makefile`。
-  - 为什么要做：后续如果要规范 `ulibc`，或者桥接外部 libc，需要先把 xv6 自己的用户态启动约定固定下来。
-  - 如何验证：现有所有用户程序可继续启动，`usertests`、`mmaptest`、`nettests` 行为不变。
 - [ ] 规范化当前 `ulibc` / 用户态支持层。
   - 要做什么：区分 syscall stub、启动代码、字符串/内存函数、printf、malloc、文件 API 包装，减少“一个文件混很多层”的状态，并补齐最小但一致的 C 运行时约定。
   - 涉及模块：`user/ulib.c`、`user/printf.c`、`user/umalloc.c`、`user/user.h`、`user/usys.pl`。
-  - 为什么要做：这一步比直接接 `newlib` 风险更低，也更能暴露 xv6 当前 syscall ABI、errno 约定、fd 语义和内存分配接口到底缺什么。
+  - 为什么要做：`crt0` 已经落地，这一步可以继续把 syscall stub、启动代码和 libc 基础函数的边界拆清，也更能暴露 xv6 当前 syscall ABI、errno 约定、fd 语义和内存分配接口到底缺什么。
   - 如何验证：`make build`、`make test-quick`、`make test-smoke`，并确认用户程序二进制大小和行为没有异常回归。
 - [ ] 评估桥接简化 libc（例如 `newlib`）的最小可行路径。
   - 要做什么：在 `crt0` 和 `ulibc` 边界稳定后，盘点 `newlib` 所需的 syscall/ABI 适配层，例如 `_sbrk`、`_write`、`_read`、`_close`、`_fstat`、`_isatty`、`_lseek`、`_exit`，以及 `errno`、reentrancy、初始化顺序等问题。

@@ -14,7 +14,7 @@ void test1(void);
 void test2(void);
 char buf[SZ];
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
     test1();
     test2();
     exit(0);

@@ -244,7 +244,7 @@ static void dns() {
     close(fd);
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
     int i, ret;
     uint16 dport = NET_TESTS_PORT;
     int run_local = 1;

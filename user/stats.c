@@ -7,7 +7,7 @@
 
 char buf[SZ];
 
-int main(void) {
+int main(int argc, char **argv) {
     int i, n;
 
     while (1) {

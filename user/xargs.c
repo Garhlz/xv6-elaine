@@ -5,7 +5,7 @@
 
 #define MAXLINE 512
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
     char buf[MAXLINE];
     char *args[MAXARG];
     int base_argc;

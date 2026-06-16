@@ -12,7 +12,7 @@ void test1();
 #define SZ 4096
 char buf[SZ];
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
     test0();
     test1();
     exit(0);

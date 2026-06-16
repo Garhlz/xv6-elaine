@@ -61,7 +61,7 @@ static void find(char *path, char *target) {
     close(fd);
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char **argv) {
     if (argc != 3) {
         fprintf(2, "usage: find path file\n");
         exit(1);

@@ -44,7 +44,7 @@ void forktest(void) {
     print("fork test OK\n");
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     forktest();
     exit(0);
 }
