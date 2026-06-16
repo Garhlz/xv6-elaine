@@ -153,9 +153,18 @@ $(KBUILD)/initcode: $(U)/initcode.S | $(KBUILD)
 tags: $(KOBJS) $(UBUILD)/_init
 	etags *.S *.c
 
-# 用户态最小 runtime：crt0 从 exec() 传入的 a0/a1 接住 argc/argv，
-# 再调用 main(argc, argv)，最后统一通过 exit() 返回内核。
-ULIB = $(UBUILD)/crt0_entry.o $(UBUILD)/crt0.o $(UBUILD)/ulib.o $(UBUILD)/usys.o $(UBUILD)/printf.o $(UBUILD)/umalloc.o $(UBUILD)/statistics.o
+# Native xv6 用户态 runtime：crt0 接住 exec() 传入的 argc/argv，
+# 然后进入 main(argc, argv)，最后通过 exit() 返回内核。
+XV6_ULIB = \
+	$(UBUILD)/crt0_entry.o \
+	$(UBUILD)/crt0.o \
+	$(UBUILD)/ustring.o \
+	$(UBUILD)/ufile.o \
+	$(UBUILD)/ugetpid.o \
+	$(UBUILD)/usys.o \
+	$(UBUILD)/printf.o \
+	$(UBUILD)/umalloc.o \
+	$(UBUILD)/statistics.o
 
 UPROGS = \
 	$(UBUILD)/_cat \
@@ -213,19 +222,19 @@ $(UBUILD)/usys.S: $(U)/usys.pl | $(UBUILD)
 $(UBUILD)/usys.o: $(UBUILD)/usys.S | $(UBUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(UBUILD)/_%: $(UBUILD)/%.o $(ULIB) | $(UBUILD)
+$(UBUILD)/_%: $(UBUILD)/%.o $(XV6_ULIB) | $(UBUILD)
 	$(LD) $(LDFLAGS) -N -e _start -Ttext 0 -o $@ $^
 	$(OBJDUMP) -S $@ > $(UBUILD)/$*.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/$*.sym
 
-$(UBUILD)/_forktest: $(UBUILD)/forktest.o $(ULIB) | $(UBUILD)
+$(UBUILD)/_forktest: $(UBUILD)/forktest.o $(XV6_ULIB) | $(UBUILD)
 	# forktest has less library code linked in - needs to be small
 	# in order to be able to max out the proc table.
-	$(LD) $(LDFLAGS) -N -e _start -Ttext 0 -o $@ $(UBUILD)/forktest.o $(UBUILD)/crt0_entry.o $(UBUILD)/crt0.o $(UBUILD)/ulib.o $(UBUILD)/usys.o
+	$(LD) $(LDFLAGS) -N -e _start -Ttext 0 -o $@ $(UBUILD)/forktest.o $(UBUILD)/crt0_entry.o $(UBUILD)/crt0.o $(UBUILD)/ustring.o $(UBUILD)/ufile.o $(UBUILD)/ugetpid.o $(UBUILD)/usys.o
 	$(OBJDUMP) -S $@ > $(UBUILD)/forktest.asm
 
-$(UBUILD)/_uthread: $(UBUILD)/uthread.o $(UBUILD)/uthread_switch.o $(ULIB) | $(UBUILD)
-	$(LD) $(LDFLAGS) -N -e _start -Ttext 0 -o $@ $(UBUILD)/uthread.o $(UBUILD)/uthread_switch.o $(ULIB)
+$(UBUILD)/_uthread: $(UBUILD)/uthread.o $(UBUILD)/uthread_switch.o $(XV6_ULIB) | $(UBUILD)
+	$(LD) $(LDFLAGS) -N -e _start -Ttext 0 -o $@ $(UBUILD)/uthread.o $(UBUILD)/uthread_switch.o $(XV6_ULIB)
 	$(OBJDUMP) -S $@ > $(UBUILD)/uthread.asm
 
 $(MKFS): mkfs/mkfs.c $(K)/fs.h $(K)/param.h | $(MKFSBUILD)
