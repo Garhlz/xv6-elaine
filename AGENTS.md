@@ -2,73 +2,222 @@
 
 ## Project Structure & Module Organization
 
-This repository is the xv6 RISC-V teaching OS with the current lab set to `net` in `conf/lab.mk`. Kernel code lives in `kernel/`, user programs and tests live in `user/`, and the host-side filesystem image builder source is in `mkfs/`. Lab configuration is under `conf/`; grader scripts live in `graders/`, while helper scripts such as `gradelib.py`, `server.py`, and `ping.py` remain at the root. Generated artifacts live under `build/` and should not be treated as source changes.
+This repository is the xv6 RISC-V teaching OS with the current lab set to `net` in `conf/lab.mk`. All 10 labs (`util` through `mmap`) are integrated into `dev/all`.
+
+### Kernel (`kernel/`)
+
+Kernel sources are organized by subsystem, with the syscall layer split into focused modules:
+
+| Area | Files |
+|---|---|
+| **process** | `proc.c` / `proc.h`, `exec.c` |
+| **VM / memory** | `vm.c`, `kalloc.c` |
+| **filesystem** | `fs.c` / `fs.h`, `bio.c`, `log.c`, `file.c` / `file.h` |
+| **syscall dispatch** | `syscall.c`, `syscall.h`, `syscall_table.c`, `syscall_internal.h`, `sysarg.c` |
+| **syscall handlers** | `sysproc.c`, `sysfd.c`, `sysfile.c`, `sysmmap.c`, `sysnetcall.c` |
+| **network** | `net.c` / `net.h`, `e1000.c`, `e1000_dev.h`, `sysnet.c` |
+| **drivers** | `virtio_disk.c`, `plic.c`, `uart.c`, `pci.c` |
+| **locks** | `spinlock.c` / `spinlock.h`, `sleeplock.c` / `sleeplock.h` |
+| **ELF / exec** | `elf.h`, `exec.c` |
+| **internal headers** | `fd_internal.h`, `syscall_internal.h` |
+
+### User-space (`user/`)
+
+Two parallel runtime chains coexist:
+
+**Native (xv6 libc) chain** — used by all existing programs and tests:
+| File | Purpose |
+|---|---|
+| `crt0_entry.S` + `crt0.c` | ELF entry point (`_start` → `crt0_main` → `main` → `exit`) |
+| `ustring.c` | `strcpy`, `strcmp`, `strlen`, `strchr`, `memmove`, `memcmp`, `memcpy`, `memset` |
+| `printf.c` | `printf` / `fprintf` / `vprintf` (subset: `%d%l%x%p%s%c%%`) |
+| `umalloc.c` | `malloc` / `free` (K&R implicit free list) |
+| `ufile.c` | `stat` via `open` / `fstat` / `close` |
+| `ugetpid.c` | `ugetpid` via USYSCALL shared page |
+| `usys.py` | generates `usys.S` stubs (`li a7, SYS_*` → `ecall` → `ret`) |
+| `usyscall.h` + `ulib.h` | user-side syscall and libc declarations |
+| `user.h` | compatibility umbrella header (native chain only) |
+
+**Picolibc experiment chain** (`user/pico/`) — separate, opt-in via `PICOLIBC_EXPERIMENT=1`:
+| File | Purpose |
+|---|---|
+| `crt0_entry.S` + `crt0.c` | picolibc-specific startup |
+| `usys_pico.py` | picolibc-compatible syscall stubs |
+| `xv6_syscall_raw.h` | minimal OS glue for `_write` / `_read` / `_sbrk` / `_exit` |
+| `user_pico.ld` | linker script |
+| `picohello.c` | PoC test program |
+
+### Other directories
+
+| Directory | Purpose |
+|---|---|
+| `tests/host/` | Go test runner (`xv6test`) — smoke, per-subsystem, heavy suites |
+| `graders/` | Legacy Python graders (course reference) |
+| `docs/` | `TODO.md` (roadmap), `lab-migration-plan.md`, `test-migrate.md`, `code-refactor.md`, `picolibc.md` |
+| `notxv6/` | Host-side pthread exercises (`ph`, `barrier`) |
+| `mkfs/` | Filesystem image builder |
+| `conf/` | Lab config (`lab.mk`: `LAB=net`) |
+| `tools/` | Helper scripts (`gen_compile_commands.sh`) |
 
 ## Build, Test, and Development Commands
 
-- `make qemu`: build xv6, create `build/fs.img`, and boot in QEMU.
-- `make qemu-gdb`: boot QEMU paused; run `gdb` in another terminal.
-- `make grade`: clean, rebuild, and run the active lab grader, currently `graders/grade-lab-net`.
-- `make server`: start the UDP echo server used by the net lab grader.
-- `make ping`: send a host-side UDP ping to the forwarded xv6 port.
-- `make clean`: remove generated kernel, user, image, and debug artifacts.
+### Build
 
-Builds expect a RISC-V GCC/binutils toolchain and `qemu-system-riscv64` in `PATH`.
+- `make build`: compile kernel, user programs (native + optionally picolibc), host tools, and filesystem tools.
+- `make image`: build `build/fs.img` only.
+- `make clean`: remove `build/` and stale legacy artifacts.
+
+### QEMU
+
+- `make qemu`: boot with normal networking (`-netdev user`).
+- `make qemu-net`: boot with UDP host forwarding (`hostfwd=udp::$(FWDPORT)-:2000`).
+- `make qemu-gdb` / `make qemu-gdb-net`: boot paused for GDB.
+
+### Testing — Go runner (primary daily workflow)
+
+- `make test-quick`: fastest subset (~8 cases, no DNS / heavy). For rapid iteration.
+- `make test-smoke`: default pre-commit check. 40 light cases across all subsystems, per-case QEMU isolation, no DNS or heavy tests.
+- `make test-<lab>` (e.g. `make test-thread`, `make test-mmap`): full per-subsystem suite with default heavy exclusion.
+- `make test-usertests`: 19 light usertests subtests.
+- `make test-heavy`: only heavy-tagged cases (`bigfile`, `sbrkmuch`, `usertests-full`).
+- `make test-all`: all suites.
+
+Go runner CLI reference:
+```bash
+xv6test list [--suite NAME] [--tags TAG,...]
+xv6test run --suite NAME [--case NAME] [--tags TAG,...] [--log-dir DIR] [--timeout DURATION]
+```
+
+Logs: `build/test-logs/<suite>/<case>.log`.
+
+### Testing — Python grader (legacy reference)
+
+- `make smoke-py`: legacy Python smoke (may not pass on echo/xargs instability).
+- `make grade-<lab>`: run one lab's Python grader.
+- `make grade-all` / `make grade-all-heavy`: full course regression.
+
+### Networking
+
+- `make server`: start UDP echo server.
+- `make ping`: send UDP ping to forwarded xv6 port.
+
+### Picolibc experiment
+
+```bash
+# 手动构建 picolibc 到指定路径后，设置 PICOLIBC_PREFIX 再构建
+# （当前 Makefile 不包含一键构建 picolibc 的 target）
+PICOLIBC_PREFIX=/path/to/picolibc-rv64-xv6 make build PICOLIBC_EXPERIMENT=1
+
+# Run picolibc test
+make qemu
+# in xv6 shell: picohello
+```
+
+Required: `meson`, `ninja`, `riscv64-unknown-elf-gcc`. CI note: picolibc experiment is not in default `make build`; gated behind `PICOLIBC_EXPERIMENT=1`.
+
+## Code Organization
+
+### Syscall split conventions
+
+The original monolithic `syscall.c` / `sysfile.c` / `sysproc.c` have been split:
+
+| Module | Contains |
+|---|---|
+| `syscall_table.c` | `syscall_table[]` 分发表（`struct syscall_entry` 数组，含 `.fn` / `.name`） |
+| `sysarg.c` | `argraw`, `argint`, `argaddr`, `argstr`, `fetchaddr`, `fetchstr` |
+| `syscall.c` | `syscall()` entry point (thin dispatcher) |
+| `sysproc.c` | `exit`, `getpid`, `fork`, `wait`, `sbrk`, `sleep`, `kill`, `uptime`, `trace`, `sysinfo`, `pgaccess`, `sigalarm`, `sigreturn` |
+| `sysfd.c` | `argfd`, `fdalloc`, `dup`, `read`, `write`, `close`, `fstat`, `pipe` |
+| `sysfile.c` | `link`, `unlink`, `open`, `symlink`, `mkdir`, `mknod`, `chdir`, `exec` |
+| `sysmmap.c` | `mmap`, `munmap` |
+| `sysnetcall.c` | `connect`, `sockalloc`, `sockclose`, `sockread`, `sockwrite`, `sockrecvudp` |
+
+New kernel `.c` files must be added to `KOBJS` in the `Makefile`.
+
+### Native ulibc split
+
+| File | Contents |
+|---|---|
+| `ustring.c` | string + memory operations (ex `ulib.c`) |
+| `ufile.c` | file stat helper |
+| `ugetpid.c` | USYSCALL-based `ugetpid` |
+| `ulib.h` | user libc declarations |
+| `usyscall.h` | syscall declarations (generated stubs match these) |
+
+New user `.c` files must be added to `ULIB` in the `Makefile`.
 
 ## Coding Style & Naming Conventions
 
-Follow `.editorconfig`: LF endings, final newline, spaces by default, 4-space indentation for C and headers, 8-space indentation for assembly, and tabs in `Makefile`. Match xv6 C style: small functions, simple control flow, lowercase identifiers, and minimal abstraction. Kernel entry points and helpers belong in matching subsystem files, for example `kernel/sysnet.c` for network syscalls and `kernel/e1000.c` for E1000 driver work. User programs should be named `user/name.c` and added to `UPROGS` as `$U/_name`.
+Follow `.editorconfig`: LF endings, final newline, spaces by default, 4-space indentation for C and headers, 8-space indentation for assembly, tabs in `Makefile`.
+
+Variable naming: prefer clear, domain-specific names over single-letter abbreviations for non-trivial locals. Acceptable short names: `i`/`j` loop indices, `p` as temporary pointer, `sz` for size, `fd` for file descriptor.
+
+Comments: use Chinese for explanations with English identifiers inline — e.g. "超级块 (superblock)"、"写时复制 (copy-on-write, COW)"、"页表项 (PTE)". Keep code identifiers, struct names, function names, and macros in English.
+
+## Comment Translation & Readability Workflow
+
+Two skills are available for iterative source improvement:
+
+- `/chinese-comment-localizer`: translate existing English comments to Chinese and add learning-oriented density. Use for subsystem files where you want to build understanding (e.g. `kernel/exec.c`, `kernel/elf.h`, `user/ulib.c`).
+- `/readability-refactor`: conservative readability pass — rename unclear locals, simplify conditions, add small clarifying comments, without changing behavior. Use after comments are localized.
+
+Conventions:
+- Run `clang-format -i` on changed `.c` / `.h` before committing.
+- Run `clangd --check=<file>` on changed headers to verify self-containment.
+- Keep translation commits separate from logic changes; amend readability tweaks into the same logical commit.
 
 ## Testing Guidelines
 
-The repository uses layered test targets. Prefer the lightest target that covers your change:
+Layered test targets. Prefer the lightest target that covers your change:
 
-- **Small / build-only changes**: `make build && make image`
-- **Fast daily loop**: `make test-quick`
-- **Before every commit**: `make test-smoke` (`make smoke` is now a compatibility alias)
-- **Subsystem changes**: `make test-<lab>` (e.g. `make test-mmap`, `make test-fs`) or `make grade-<lab>` for Python grader comparison
-- **Stage/merge regression**: `make test-heavy` (only heavy cases) or `make grade-all-heavy` (full heavy suite)
-- **Network changes**: additionally run `make server`, `make qemu-net`, `make ping`, or `nettests` in xv6 shell
-- Legacy Python smoke remains available as `make smoke-py`; use `xv6test run --suite smoke --tags <tag>` for tag-filtered Go checks.
+- **Build-only**: `make build && make image`
+- **Fast iteration**: `make test-quick`
+- **Before every commit**: `make test-smoke`
+- **Subsystem changes**: `make test-<lab>` (e.g. `make test-mmap`, `make test-fs`) or `make grade-<lab>` for Python comparison
+- **Stage/merge regression**: `make test-heavy` (only heavy cases) or `make grade-all-heavy` (full)
 
-All graders live under `graders/`. Keep test output deterministic; graders match exact lines.
+Heavy tests (`bigfile`, `sbrkmuch`, `usertests-full`) are excluded by default in all suites; run them explicitly with `--tags heavy`.
+
+Legacy Python smoke: `make smoke-py`. All graders live under `graders/`.
 
 ## Commit & Pull Request Guidelines
 
-The commit format depends on the type of change:
+- **Lab migration commits**: `feat(<lab>): integrate <lab> lab changes` with `- ` bullets, no blank lines between bullets.
+- **Non-lab maintenance commits**: short imperative subjects, e.g. `docs: refresh roadmap`, `build: move artifacts under build`, `refactor: modernize bio.c naming`.
 
-- **Lab migration commits**: use `feat(<lab>): integrate <lab> lab changes` followed by `- ` bullet points with no blank lines between them.
-- **Non-lab maintenance commits**: use short imperative subjects, e.g. `docs: refresh roadmap`, `build: move artifacts under build`, `refactor: modernize bio.c naming`.
-- Keep commits focused on one topic. Pull requests should state the subsystem changed, summarize behavior, list validation commands run, and mention any known limitations. Include terminal output only when it helps explain a failure or non-obvious result.
+Body format for all commits:
+
+```
+type(scope): short subject
+
+- first bullet describing one logical piece
+- second bullet describing another logical piece
+- no blank lines between bullets; each - line is a self-contained sentence
+```
+
+- Keep commits focused on one topic.
 - Do **not** add `Co-Authored-By: Claude`.
 
 ## Agent-Specific Instructions
 
 ### Branch & Workspace Awareness
 
-- The integration branch is **`dev/all`** (based on `net`). Always verify with `git branch` before editing.
-- Never work directly on lab branches (`util`, `syscall`, `pgtbl`, `net`, etc.) — those are reference implementations checked out from upstream.
+- Integration branch: **`dev/all`** (based on `net`). Verify with `git branch` before editing.
+- Never work directly on lab reference branches (`util`, `syscall`, `pgtbl`, `net`, etc.).
 
-### Code Hygiene (headers, formatting, diagnostics)
+### Kernel Module Hygiene
 
-- After editing any header, run `clangd --check=<file>` to catch forward-reference or missing-type errors. Headers must be **self-contained**: include their own `#include` dependencies (e.g. `types.h` for `uint64`).
-- Before every commit, run `clang-format -i` on every changed `.c` and `.h` file. The repository `.clang-format` uses 4-space indent, LLVM base style.
-- When writing or translating comments, **keep English names** for technical terms, structs, functions, and macros alongside the Chinese explanation — e.g. "超级块 (superblock)"、"inode 表 (itable)"、"空闲位图 (bitmap)"、"间接块 (indirect block)"、"引用计数 (ref)"。
+- New kernel `.c` → add to `KOBJS` in `Makefile`.
+- New user `.c` → add to `ULIB` (if library) or `UPROGS` (if program) in `Makefile`.
+- After editing any header, run `clangd --check=<file>`.
+- Before every commit, run `clang-format -i` on changed `.c` and `.h` files.
 
-### Lab Migration Workflow
+### Lab Migration Workflow (historical — all labs migrated)
 
-When migrating a lab from its reference branch to `dev/all`:
-
-1. `git diff net..<lab> --name-only` to list the functional files for that lab.
-2. **Reference the original branch implementation** — use `git show <lab>:<file>` to read the exact working code from the lab branch. Copy its logic faithfully, especially subtle details like macro definitions and conditionals.
-3. Migrate only the **lab-specific functional code** — skip formatting noise, toolchain config (`.clang-format`, `.clangd`, `compile_commands.json`), and temporary files.
-4. Remove `#ifdef LAB_*` guards for the migrated lab; `dev/all` integrates all labs unconditionally.
-5. **Do not modify grader expectations** to match local file differences. Instead, add stable test data (e.g. the original `README` file) so the grader stays unchanged.
-6. Run the grader (`make grade-<lab>` or `make grade-all`) and confirm all tests pass.
-7. After all changes, sync the migration status in `docs/lab-migration-plan.md` and `README.md`.
+For reference only; all 10 labs are integrated. See `docs/lab-migration-plan.md`.
 
 ### Grading Conventions
 
 - `make grade-all` order: **util → syscall → net → pgtbl → traps → cow → thread → lock → fs → mmap**.
-- `conf/lab.mk` keeps `LAB=net` with a comment explaining that `dev/all` integrates multiple labs; this ensures net-specific kernel objects and QEMU flags are always active.
-- **Remove `time.txt` checks** from all graders. The `@test(1, "time")` / `check_time()` block in every grader script should be deleted — `time.txt` is a course hand-in artifact that is irrelevant for `dev/all`.
+- `conf/lab.mk` keeps `LAB=net` for net-specific kernel objects and QEMU flags.
+- Remove `time.txt` checks from all graders.

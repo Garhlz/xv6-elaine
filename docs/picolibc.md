@@ -1,87 +1,54 @@
-# Picolibc Integration Plan
+# Picolibc 接入记录
 
-本文档记录 `dev/all` 分支接入 `picolibc` 的分阶段计划。目标不是一次性替换 xv6 现有全部用户态支持层，而是先建立一条**独立、可验证、可回滚**的 `picolibc` 实验链路，再逐步扩展覆盖范围。
+本文档跟踪 `dev/all` 分支接入 `picolibc` 的进度和计划。与 `lab-migration-plan.md`（历史记录）和 `TODO.md`（工程路线）不同的是，本文件聚焦一条具体技术链路的分阶段落地。当前已完成阶段 0/1/2（crt0 硬化、scaffold、raw syscall），阶段 3/4/5 待推进，阶段 6（picohello）依赖阶段 3 和阶段 5 完成后才能按 xv6 syscall 路径稳定运行。
 
-## 1. 目标与约束
+## 1. 当前基线
 
-本阶段目标：
+### 1.1 已有基础设施
 
-- 在不影响现有 xv6 用户程序的前提下，引入一条 `picolibc` PoC 链路。
-- 让 `build/user/_picohello` 可以被打包进 `fs.img` 并在 xv6 shell 中运行。
-- 先跑通：
-  - `printf`
-  - `malloc/free`
-  - `main(argc, argv)` 返回后正常 `exit`
-- 保持现有 native 用户程序和测试入口不变：
-  - `cat`
-  - `sh`
-  - `usertests`
-  - `nettests`
-  - `mmaptest`
-  - `make test-quick`
+- `_start` → `crt0_main()` → `main(argc, argv)` → `exit(status)` — 已落地
+- `user/crt0_entry.S` + `user/crt0.c` — 已就绪，含兜底死循环和 `noreturn` 标注
+- `main` 签名统一为 `int main(int argc, char **argv)` — 已完成
+- ulibc 模块化拆分（`ustring.c` / `ufile.c` / `ugetpid.c` / `ulib.h`）— 已完成
+- `usys.py` 替代 `usys.pl` — 已完成
+- `PICOLIBC_EXPERIMENT=1` 构建门控 — 已就绪
+- `user/pico/` 独立实验目录 — 已创建
+- `picohello` 链接规则和 linker script 已就绪，依赖阶段 3（OS glue）和阶段 5（构建 picolibc）完成后验证
 
-核心约束：
+### 1.2 当前 xv6 用户态 ABI
 
-- 不直接替换当前 `ULIB`。
-- 不把 `picolibc` 和当前 `ulib.o` / `printf.o` / `umalloc.o` 混链。
-- 先静态链接，不做动态链接。
-- 先使用 xv6 自己的 `_start` / `crt0` 模型，不直接切到 `picocrt`。
-- 第一阶段不修改 `kernel/exec.c` 的 ELF 加载语义。
-- 第一阶段不追求完整 POSIX，只提供 `picolibc` PoC 所需的最小 OS glue。
-
-## 2. 当前仓库基线
-
-当前用户态基础已经具备：
-
-- 用户程序 ELF entry 已统一为 `_start`
-- `user/crt0_entry.S` 提供入口
-- `user/crt0.c` 提供 `crt0_main(argc, argv) -> exit(main(argc, argv))`
-- 用户程序 `main` 签名已统一为 `int main(int argc, char **argv)`
-
-当前 xv6 用户态 ABI：
-
-- `exec()` 将 `argc` 放入 `a0`
-- `exec()` 将 `argv` 放入 `a1`
+- `exec()` 将 `argc` 放入 `a0`，`argv` 放入 `a1`
 - `exec()` 将 `epc` 设为 ELF entry
 - `_start` 直接承接 `argc/argv`
 
-这意味着第一阶段不需要重做 native 启动链，只需要为 `picolibc` 增加一条独立链接路径。
+第一阶段不需要重做 native 启动链，只需为 `picolibc` 增加独立链接路径。
 
-## 3. 关键官方文档
-
-接入过程中优先参考以下 `picolibc` 官方文档：
+### 1.3 关键官方文档
 
 - OS integration: <https://github.com/picolibc/picolibc/blob/main/doc/os.md>
 - Build options: <https://github.com/picolibc/picolibc/blob/main/doc/build.md>
 - Linking: <https://github.com/picolibc/picolibc/blob/main/doc/linking.md>
 - Init / constructors: <https://github.com/picolibc/picolibc/blob/main/doc/init.md>
 
-这些文档对当前计划最相关的点：
+## 2. 目标与约束
 
-- `os.md`
-  - `picolibc` 不内嵌 OS 支持，期望目标系统提供 POSIX 风格接口
-  - 标准 I/O 和许多 libc 能力依赖外部 `read/write/close/_exit/fstat/lseek/...`
-  - `malloc/free` 依赖 `sbrk`
-- `build.md`
-  - 可配置 `picocrt`、`malloc`、`single-thread`、TLS、global errno
-  - 提供 RISC-V cross file 示例
-- `linking.md`
-  - 可以使用自定义 linker script
-  - 如果用 `-specs=picolibc.specs`，自定义脚本应通过 GCC 的 `-Tcustom.ld`
-- `init.md`
-  - 若使用自定义 startup code，后续可能需要自己决定是否调用 `__libc_init_array` / `__libc_fini_array`
+### 2.1 第一阶段目标
 
-## 4. 总体迁移策略
+- 在不影响现有 xv6 用户程序的前提下，引入一条 `picolibc` PoC 链路
+- `build/user/_picohello` 可被打包进 `fs.img` 并在 xv6 shell 中运行
+- 先跑通 `printf`、`malloc/free`、`main(argc, argv)` 返回后正常 `exit`
+- 保持现有 native 用户程序不变（`cat`、`sh`、`usertests`、`nettests`、`mmaptest`、`make test-quick` 等）
 
-推荐路线：
+### 2.2 核心约束
 
-1. 先做一条独立的 `picolibc` 实验链路，只构建 `_picohello`
-2. 用 `__xv6_*` raw syscall 包装隔离 libc 符号
-3. 提供最小 OS glue，让 `printf/malloc/exit` 跑通
-4. 用独立 linker script 控制 `picolibc` 用户程序 ELF
-5. 跑通后再逐步扩展到简单用户程序
+- 不直接替换当前 `ULIB`
+- 不把 `picolibc` 和 native `ulib.o` / `printf.o` / `umalloc.o` 混链
+- 先静态链接，不做动态链接
+- 先用 xv6 自己的 `_start` / `crt0` 模型，不直接切到 `picocrt`
+- 第一阶段不修改 `kernel/exec.c` 的 ELF 加载语义
+- 第一阶段不追求完整 POSIX，只提供 `picolibc` PoC 所需的最小 OS glue
 
-明确不做的事：
+### 2.3 明确不做的事
 
 - 第一阶段不迁移 `sh` / `init` / `usertests`
 - 第一阶段不修改 native `user/user.h` 作为 `picolibc` 公共头
@@ -89,92 +56,52 @@
 - 第一阶段不引入完整 Unix 初始栈布局
 - 第一阶段不处理 `envp` / `auxv`
 
-## 5. 目录与边界设计
+### 2.4 整体路线
 
-建议新增独立实验目录：
+先不替换系统 libc，先做独立的 `picolibc _picohello` 链路；用 `__xv6_*` raw syscall 隔离符号；用最小 OS glue 跑通 `printf/malloc/exit`；确认稳定后，再迁移简单用户程序。
+
+```text
+crt0 硬化 → scaffold → raw syscall → OS glue → linker script → 构建 picolibc → picohello → 扩展程序 → init/fini
+```
+
+## 3. 目录与边界设计
 
 ```text
 user/pico/
-  crt0_entry.S
-  crt0.c
-  picohello.c
-  usys_pico.py
-  xv6_syscall_raw.h
-  picolibc_os.c
-  user_pico.ld
+  crt0_entry.S          # picolibc 专用启动入口
+  crt0.c                # picolibc 专用 C 启动包装
+  picohello.c           # PoC 测试程序
+  usys_pico.py          # 生成 __xv6_* raw syscall stub
+  xv6_syscall_raw.h     # __xv6_* raw syscall 声明
+  picolibc_os.c         # 最小 OS glue（_write/_read/_sbrk/_exit 等）
+  user_pico.ld          # picolibc 专用 linker script
 ```
 
-建议第一阶段就新增 `user/pico/crt0_entry.S` / `user/pico/crt0.c`。
+边界隔离：
 
-原因：
+- native xv6 用户程序 → 继续使用 `XV6_ULIB`
+- `picolibc` 实验程序 → 只用 `PICO_OBJS + libc.a + libgcc.a`
+- `picolibc` 启动代码独立于 native `crt0`，方便后续接入 `__libc_init_array` / `__libc_fini_array`
 
-- `picolibc` startup 后续会接入 `__libc_init_array` / `__libc_fini_array`
-- native `crt0` 继续只服务 `XV6_ULIB`
-- 两条链路从一开始隔离，避免调试链接错误时混入 native 头文件和符号
+## 4. 阶段 0：硬化 crt0（已完成）
 
-第一阶段边界：
+- [x] `crt0_main` 标记 `__attribute__((noreturn))`，明确语义
+- [x] `_start` 增加 `1: j 1b` 兜底死循环，防止异常返回时 PC 跑飞
 
-- native xv6 用户程序：
-  - 继续使用当前 `XV6_ULIB`
-- `picolibc` 实验程序：
-  - 使用单独 `PICO_OBJS + libc.a + libgcc.a`
+- 涉及模块：`user/crt0.c`、`user/crt0_entry.S`。
+- 验证方式：`make build && make image && make test-quick`。
 
-## 6. 阶段 0：硬化当前 crt0
+## 5. 阶段 1：建立独立 picolibc 实验链路（已完成）
 
-在开始 `picolibc` 迁移前，先补两个小修：
+依赖：阶段 0。
 
-### 6.1 `crt0_main` 标记为 `noreturn`
+### 5.1 Makefile 设计
 
-目标：
-
-- 明确语义：`crt0_main()` 不应返回
-- 让编译器和后续维护者都能看到启动路径约束
-
-建议形态：
-
-```c
-__attribute__((noreturn))
-void crt0_main(int argc, char **argv) {
-    exit(main(argc, argv));
-}
-```
-
-### 6.2 `_start` 增加 fallback loop
-
-目标：
-
-- 如果 `crt0_main()` 异常返回，不直接继续执行未知地址
-
-建议形态：
-
-```asm
-.section .text
-.globl _start
-_start:
-    call crt0_main
-1:
-    j 1b
-```
-
-说明：
-
-- 这是启动代码防御性增强，不改变正常语义
-
-## 7. 阶段 1：建立独立的 picolibc 实验链路
-
-### 7.1 Makefile 设计目标
-
-新增一套独立变量：
-
-```make
+```makefile
 PICOLIBC_EXPERIMENT ?=
 PICOLIBC_PREFIX ?= $(CURDIR)/opt/picolibc-rv64-xv6
 PICO_BUILD = $(UBUILD)/pico
-```
 
-并单独组织：
-
-```make
 PICO_OBJS = \
   $(PICO_BUILD)/crt0_entry.o \
   $(PICO_BUILD)/crt0.o \
@@ -185,270 +112,138 @@ PICO_OBJS = \
 
 - 不链接 native `ulib.o` / `printf.o` / `umalloc.o`
 - 只在 `PICOLIBC_EXPERIMENT=1` 时构建 `_picohello`
-- 第一阶段只建立独立 build/link scaffold；第二阶段加入 raw syscall，OS glue 放到后续阶段
+- 第一阶段只建立 build/link scaffold
 
-### 7.2 为什么不能混链当前 ULIB
+### 5.2 为什么不能混链
 
-如果把 `picolibc` 和 native `ULIB` 混在一起，极易遇到：
+混链 native `ULIB` 和 `picolibc` 会导致：
 
-- `printf` 重复定义
-- `malloc/free` 重复定义
-- `memcpy/strlen/memset` 重复定义
+- `printf` / `malloc` / `free` / `memcpy` / `strlen` / `memset` 重复定义
 - `exit` / `_exit` 语义混杂
 - 头文件与函数原型冲突
 
-所以第一阶段必须严格分离：
+所以两条链路从第一天就必须严格分离。
 
-- native 用户程序：继续 old path
-- `picolibc` 实验程序：only `crt0 + raw syscall + os glue + picolibc`
+- 涉及模块：`user/pico/`、`Makefile`。
+- 验证方式：`make build` 在 `PICOLIBC_EXPERIMENT` 关闭/开启时均正常，`make image && make qemu` 后 native 程序不受影响。
 
-## 8. 阶段 2：引入 raw syscall 层
+## 6. 阶段 2：raw syscall 层（已完成）
 
-### 8.1 动机
+依赖：阶段 1。
 
-当前 `user/usys.py` 生成的是 libc 友好的名字：
+### 6.1 动机
 
-- `read`
-- `write`
-- `close`
-- `exit`
-- `sbrk`
+native `user/usys.py` 生成的符号名（`read`、`write`、`close` 等）是 libc 友好的，和 `picolibc` 期望提供/调用的 POSIX/libc 符号直接冲突。实验链路需要生成带前缀的 raw syscall：`__xv6_read`、`__xv6_write`、`__xv6_exit`、`__xv6_sbrk` 等。
 
-这和 `picolibc` 期望提供或调用的 POSIX / libc 符号会直接冲突。
+### 6.2 文件
 
-所以实验链路需要生成一套带前缀的 raw syscall：
+- `user/pico/usys_pico.py` — 参考 `user/usys.py`，生成 `__xv6_*` 符号
+- `user/pico/xv6_syscall_raw.h` — 只声明 `__xv6_*` raw syscall，不引入 `user/user.h`；`__xv6_exit` 返回类型为 `void`（noreturn），其余 stub 返回 `int`
 
-- `__xv6_read`
-- `__xv6_write`
-- `__xv6_close`
-- `__xv6_exit`
-- `__xv6_sbrk`
-- `__xv6_fstat`
+### 6.3 Raw syscall 集合
 
-### 8.2 文件设计
+P0（最小集合）：`__xv6_exit`、`__xv6_read`、`__xv6_write`、`__xv6_close`、`__xv6_fstat`、`__xv6_sbrk`
 
-新增：
+P1（按需补充）：`__xv6_open`、`__xv6_unlink`、`__xv6_getpid`、`__xv6_kill`
 
-```text
-user/pico/usys_pico.py
-user/pico/xv6_syscall_raw.h
-```
+- 涉及模块：`user/pico/usys_pico.py`、`user/pico/xv6_syscall_raw.h`。
+- 验证方式：`nm build/user/pico/usys_pico.o | grep __xv6` 确认 `__xv6_*` 符号均生成。
 
-其中：
+## 7. 阶段 3：最小 OS glue
 
-- `usys_pico.py`
-  - 参考现有 `user/usys.py`
-  - 但生成 `__xv6_*` 符号
-- `xv6_syscall_raw.h`
-  - 只声明 `__xv6_*` raw syscall
-  - 不引入 `user/user.h`
+依赖：阶段 2。与阶段 4（linker script）和阶段 5（构建 picolibc）可并行推进。
 
-### 8.3 第一阶段需要的 raw syscall
+### 7.1 设计
 
-P0 最小集合：
+新增 `user/pico/picolibc_os.c`，实现 `picolibc` 所需的 POSIX 风格接口包装。
 
-- `__xv6_exit`
-- `__xv6_read`
-- `__xv6_write`
-- `__xv6_close`
-- `__xv6_fstat`
-- `__xv6_sbrk`
+头文件约束：
 
-P1 再补：
+- **不要 include `user/user.h`**（native 原型与 libc 原型不一致，混用会类型冲突）
+- 只 include 标准 libc/POSIX 头 + `xv6_syscall_raw.h`
 
-- `__xv6_open`
-- `__xv6_unlink`
-- `__xv6_getpid`
-- `__xv6_kill`
+### 7.2 P0 必需接口
 
-## 9. 阶段 3：实现最小 OS glue
+- `_exit(status)` — 直接调 `__xv6_exit(status)`，不返回
+- `write(fd, buf, n)` — 直接转 `__xv6_write`，失败时设置最小 `errno`
+- `read(fd, buf, n)` — 同上
+- `close(fd)` — 直接转 `__xv6_close`
+- `sbrk(n)` — 包装 xv6 `sbrk`，失败返回 `(void *)-1`
+- `lseek(fd, offset, whence)` — xv6 无真正 seek，先返回 `ESPIPE`
+- `isatty(fd)` — 对 `0/1/2` 返回 true
+- `fstat(fd, buf)` — 第一阶段满足 stdio 最小需要，至少不崩
 
-新增：
+目标：跑通 `printf`、`malloc/free`、`exit`。
 
-```text
-user/pico/picolibc_os.c
-```
+### 7.3 `struct stat` 风险
 
-### 9.1 头文件约束
+不要在同一编译单元中混用 `kernel/stat.h` 和 `<sys/stat.h>`。
 
-这一阶段最重要的规则：
+策略：在 `picolibc_os.c` 中维护私有 `struct xv6_stat`，由 xv6 ABI 结构手动转换到 libc `struct stat`。第一阶段如只需支撑 `printf`，可先做最小填充。
 
-- `picolibc` 实验链路的 `.c` 文件**不要 include `user/user.h`**
-- `picolibc_os.c` 只包含：
-  - 标准 libc / POSIX 头
-  - `xv6_syscall_raw.h`
+- 涉及模块：`user/pico/picolibc_os.c`、`user/pico/xv6_syscall_raw.h`。
+- 验证方式：编译通过，链接 `_picohello` 时无 `_write` / `_read` / `_sbrk` / `_exit` undefined symbol。
 
-原因：
+## 8. 阶段 4：Picolibc 专用 linker script
 
-- native `user/user.h` 里的 `read/write/sbrk` 原型和标准 libc 原型不一致
-- 混用会立刻造成类型冲突
+依赖：阶段 1。与阶段 3（OS glue）和阶段 5（构建 picolibc）可并行推进。
 
-### 9.2 第一阶段只实现 P0 能力
-
-P0 必需接口：
-
-- `_exit`
-- `read`
-- `write`
-- `close`
-- `fstat`
-- `isatty`
-- `lseek`
-- `sbrk`
-
-目标：
-
-- 跑通 `printf`
-- 跑通 `malloc/free`
-- 跑通 `exit`
-
-### 9.3 接口语义建议
-
-- `_exit(status)`
-  - 直接调用 `__xv6_exit(status)`
-  - 不返回
-- `write/read/close`
-  - 直接转到底层 `__xv6_*`
-  - 失败时设置最小 `errno`
-- `sbrk`
-  - 直接包装 xv6 `sbrk`
-  - 失败时返回 `(void *) -1`
-- `lseek`
-  - xv6 当前无真正 seek 语义时，可先返回 `ESPIPE`
-- `isatty`
-  - 对 `0/1/2` 返回 true
-- `fstat`
-  - 第一阶段只满足 stdio 最小需要
-  - 至少确保 `stdout/stderr` 不崩
-
-### 9.4 `struct stat` 风险
-
-不要在同一编译单元中直接混用：
-
-- `kernel/stat.h`
-- `<sys/stat.h>`
-
-建议：
-
-- 在 `picolibc_os.c` 中维护一个私有 `struct xv6_stat`
-- 后续由 xv6 ABI 结构手动转换到 libc `struct stat`
-
-第一阶段如果只需支撑 `printf`，可以先做最小填充，再在第二阶段补准确转换。
-
-## 10. 阶段 4：Picolibc 专用 linker script
-
-新增：
-
-```text
-user/pico/user_pico.ld
-```
+新增 `user/pico/user_pico.ld`。
 
 第一阶段目标：
 
 - `ENTRY(_start)`
-- 明确 `.text/.rodata/.data/.bss`
+- 明确 `.text` / `.rodata` / `.data` / `.bss`
 - 导出 `end`
 - 产出静态 ELF
 - 保持当前 xv6 `exec()` 可接受的 LOAD segment 布局
 
-第一阶段**不急着**引入完整 constructor / destructor 支持，只需要为后续保留扩展点即可。
+- 涉及模块：`user/pico/user_pico.ld`、`Makefile`。
+- 验证方式：
+  ```bash
+  riscv64-unknown-elf-readelf -h build/user/_picohello   # entry 指向 _start，无 INTERP
+  riscv64-unknown-elf-readelf -l build/user/_picohello   # LOAD segment 合理
+  riscv64-unknown-elf-nm -u build/user/_picohello        # 无动态链接依赖
+  ```
 
-需要重点检查：
+如果 ELF 被 `exec()` 拒绝，优先调整 linker script / 链接参数，不首先修改 `kernel/exec.c`。
 
-- `readelf -h`
-- `readelf -l`
-- `nm -u`
+## 9. 阶段 5：构建外部 picolibc
 
-必须满足：
+依赖：宿主机 riscv64 工具链 + meson/ninja。与阶段 3（OS glue）和阶段 4（linker script）可并行推进。
 
-- entry 指向 `_start`
-- 没有 `INTERP`
-- 没有动态链接依赖
-- LOAD segment 对当前 loader 友好
+### 9.1 构建工具前置
 
-如果 ELF 被当前 `exec()` 拒绝，优先调整：
+需要确认宿主机具备：`riscv64-unknown-elf-gcc` / `ar` / `as` / `ld`，以及 `meson`、`ninja`。
 
-- linker script
-- 链接参数
+### 9.2 配置选项
 
-而不是第一时间改 `kernel/exec.c`。
+结合 `build.md`，第一阶段配置：
 
-## 11. 阶段 5：构建外部 picolibc
+- `picocrt=false` — xv6 已有自己的 `_start`
+- `multilib=false` — 只需要单一 ABI
+- `tests=false` — 不需要 picolibc 自带测试
+- `single-thread=true` — xv6 用户态单线程
+- `thread-local-storage=false` — 先避免 TLS 问题
+- `newlib-global-errno=true` — 先用单一全局 `errno`
+- `enable-malloc=true` — 让 picolibc malloc 通过 `sbrk` 工作
 
-### 11.1 构建工具前置
+### 9.3 Cross file
 
-需要确认宿主机具备：
+维护一份 `toolchain/cross-riscv64-xv6.txt`，参考 `build.md` 中 RISC-V cross file 示例。编译选项尽量与 xv6 当前用户程序一致：
 
-- `riscv64-unknown-elf-gcc`
-- `riscv64-unknown-elf-ar`
-- `riscv64-unknown-elf-as`
-- `riscv64-unknown-elf-ld`
-- `meson`
-- `ninja`
+- `-nostdlib`、`-ffreestanding`、`-fno-common`
+- `-mcmodel=medany`、`-mno-relax`
+- `-march=rv64gc`、`-mabi=lp64`（以本地工具链实际配置为准）
 
-### 11.2 第一阶段建议配置
+- 涉及模块：`toolchain/cross-riscv64-xv6.txt`、`Makefile`。
+- 验证方式：`make PICOLIBC_EXPERIMENT=1 build` 可通过 `_picohello` 链接，无 libc symbol undefined 错误。
 
-结合 `build.md`，第一阶段建议优先尝试：
+## 10. 阶段 6：跑通 picohello
 
-- `picocrt=false`
-- `multilib=false`
-- `tests=false`
-- `single-thread=true`
-- `thread-local-storage=false`
-- `newlib-global-errno=true`
+依赖：阶段 0/1/2/3/4/5。阶段 3（OS glue）未完成时 picolibc 的 `exit()` 无法通过 `_exit` syscall 返回内核，不宜宣称"已跑通"。
 
-原因：
-
-- xv6 已有自己的 `_start`
-- 第一阶段不需要 `picolibc` 自带启动对象
-- 先避免 TLS / reentrancy 问题
-- 先用单一全局 `errno`
-- 先禁用复杂锁语义
-
-对 `malloc`：
-
-- 保留 `enable-malloc=true`
-- 先让 `picolibc malloc` 通过 `sbrk` 工作
-
-### 11.3 cross file
-
-建议参考 `build.md` 中的 RISC-V cross file 示例，单独维护一份：
-
-```text
-toolchain/cross-riscv64-xv6.txt
-```
-
-并尽量保持与 xv6 当前用户程序编译参数一致，例如：
-
-- `-nostdlib`
-- `-ffreestanding`
-- `-fno-common`
-- `-mcmodel=medany`
-- `-mno-relax`
-
-是否需要：
-
-- `-march=rv64gc`
-- `-mabi=lp64`
-
-以本地工具链实际配置为准。
-
-## 12. 阶段 6：跑通第一个程序 `_picohello`
-
-建议新增：
-
-```text
-user/pico/picohello.c
-```
-
-第一版只验证：
-
-- `printf`
-- `argc/argv`
-- `malloc/free`
-- `return 0`
-
-建议形态：
+文件：`user/pico/picohello.c`
 
 ```c
 #include <stdio.h>
@@ -457,7 +252,6 @@ user/pico/picohello.c
 int main(int argc, char **argv) {
     printf("hello from picolibc\n");
     printf("argc = %d\n", argc);
-
     for (int i = 0; i < argc; i++)
         printf("argv[%d] = %s\n", i, argv[i]);
 
@@ -469,209 +263,94 @@ int main(int argc, char **argv) {
 }
 ```
 
-预期验收：
+- 涉及模块：`user/pico/picohello.c`。
+- 验证方式：
+  - `picohello` 可在 xv6 shell 中执行
+  - `printf` 输出正常
+  - `malloc/free` 不崩
+  - `main` 返回后正确 `exit`，回到 shell
 
-- `picohello` 能执行
-- `printf` 输出正常
-- `malloc/free` 不崩
-- 返回 shell
+## 11. 阶段 7：测试与排错
 
-## 13. 阶段 7：测试与排错流程
+依赖：阶段 6。
 
-### 13.1 构建与回归
+### 11.1 回归保护
 
-必须保证：
+`PICOLIBC_EXPERIMENT` 关闭时，以下命令必须保持原行为不变：
 
-- `make build`
-- `make image`
-- `make test-quick`
+```bash
+make build && make image && make test-quick
+```
 
-在 `PICOLIBC_EXPERIMENT` 关闭时保持原行为不变。
+### 11.2 Picolibc 构建与运行
 
-### 13.2 Picolibc 实验目标
+```bash
+make PICOLIBC_EXPERIMENT=1 build
+make PICOLIBC_EXPERIMENT=1 image
+make qemu
+# xv6 shell: picohello a b c
+```
 
-建议目标：
+### 11.3 ELF 检查
 
-- `make PICOLIBC_EXPERIMENT=1 build`
-- `make PICOLIBC_EXPERIMENT=1 image`
+```bash
+riscv64-unknown-elf-readelf -h build/user/_picohello
+riscv64-unknown-elf-readelf -l build/user/_picohello
+riscv64-unknown-elf-nm -u build/user/_picohello
+riscv64-unknown-elf-objdump -d build/user/_picohello
+```
 
-然后进入 xv6 手工运行：
+- 验证方式：全部命令输出符合预期。
 
-- `picohello`
-- `picohello a b c`
+### 11.4 常见失败速查
 
-### 13.3 ELF 检查
+- **符号冲突（重复定义）** — 原因：误把 native `ULIB` 混进 picolibc 目标。处理：只保留 `crt0 + raw syscall + os glue + libc.a + libgcc.a`
+- **`printf` 无输出** — 原因：`write()` 未实现或 stdout 路径不通。处理：检查 OS glue 中 `write`/`isatty`
+- **`malloc` 崩溃** — 原因：`sbrk` 包装有问题或误链接 `umalloc.o`。处理：检查 `sbrk` 包装和链接顺序
+- **ELF 被 `exec()` 拒绝** — 原因：LOAD segment 不兼容。处理：先查 `readelf -l`，优先调 linker script
+- **TLS / errno undefined symbol** — 原因：配置不匹配。处理：检查 `thread-local-storage` / `newlib-global-errno`
 
-建议固定检查：
+## 12. 阶段 8：逐步扩展
 
-- `riscv64-unknown-elf-readelf -h build/user/_picohello`
-- `riscv64-unknown-elf-readelf -l build/user/_picohello`
-- `riscv64-unknown-elf-nm -u build/user/_picohello`
-- `riscv64-unknown-elf-objdump -d build/user/_picohello`
+依赖：阶段 6 稳定通过后。
 
-### 13.4 常见失败分类
+### 12.1 第二阶段：扩展 OS glue
 
-1. 符号冲突
-   - 原因：误把 native `ULIB` 混进 picolibc 目标
-   - 处理：只保留 `crt0 + raw syscall + os glue + libc.a + libgcc.a`
+补 P1 接口：`open`、`stat`、`unlink`、`getpid`、`kill`。
 
-2. `printf` 无输出
-   - 先检查 `write()` 是否实现
-   - 再检查 `stdout/stderr` 路径是否可用
+- 目标：支撑简单文件 I/O（`fopen` / `fread` / `fclose`）
+- 验证方式：编译通过，新增接口无 undefined symbol
 
-3. `malloc` 崩溃
-   - 先检查 `sbrk` 包装
-   - 再检查是否误链接 `umalloc.o`
+### 12.2 第三阶段：init/fini
 
-4. ELF 被 `exec()` 拒绝
-   - 先查 `readelf -l`
-   - 优先调 linker script / 链接参数
+当 `picolibc` 某些功能依赖初始化路径时，再考虑：
 
-5. TLS / errno 相关 undefined symbol
-   - 回头检查 `thread-local-storage` / `newlib-global-errno` 配置
+- 为 `picolibc` 分叉专用 `crt0`，调用 `__libc_init_array` / `__libc_fini_array`
+- 在 linker script 中补齐 `__preinit_array_start/end`、`__init_array_start/end`、`__fini_array_start/end`
 
-## 14. 阶段 8：逐步扩大覆盖面
+### 12.3 程序迁移顺序
 
-只有在 `_picohello` 稳定后，才考虑继续扩展。
+优先：`picohello` → `echo` → `sleep` → `cat` → `wc` → `ls` → `grep`
 
-### 8.1 第二阶段扩展 OS glue
+暂不优先：`init`、`sh`、`usertests`、`nettests`、`mmaptest`（系统启动关键路径或覆盖面太广，不适合做 libc PoC 首批迁移）。
 
-补 P1 接口：
+## 13. 提交建议
 
-- `open`
-- `stat`
-- `unlink`
-- `getpid`
-- `kill`
+- **Commit 1**: `refactor(user): harden crt0 entry` — `_start` fallback loop + `crt0_main` noreturn
+- **Commit 2**: `build(user): add picolibc experiment scaffolding` — 新增 `user/pico/`、`picohello.c`、`user_pico.ld`、Makefile 门控
+- **Commit 3**: `user: add raw syscall stubs for libc integration` — 新增 `usys_pico.py`、`xv6_syscall_raw.h`，生成 `__xv6_*`
+- **Commit 4**: `libc: add picolibc OS glue for xv6` — 新增 `picolibc_os.c`，跑通 P0 OS glue 接口
+- **Commit 5**: `build(user): link picohello with picolibc` — Makefile 接入外部 picolibc 产物，`_picohello` 成功链接
+- **Commit 6**: `docs: record picolibc integration status` — 记录当前可用接口、已知限制、最小验证方式
 
-目标：
+## 14. 第一阶段完成标准
 
-- 尝试简单文件 I/O
-- 逐步支持 `fopen` / `fread` / `fclose`
-
-### 8.2 第三阶段再考虑 init/fini
-
-当确实需要 constructor / destructor，或 `picolibc` 某些功能依赖初始化路径时，再考虑：
-
-- 为 `picolibc` 分叉专用 `crt0`
-- 调用 `__libc_init_array`
-- 调用 `__libc_fini_array`
-- 在 linker script 中补齐：
-  - `__preinit_array_start/end`
-  - `__init_array_start/end`
-  - `__fini_array_start/end`
-
-### 8.3 程序迁移顺序
-
-建议顺序：
-
-1. `picohello`
-2. `echo`
-3. `sleep`
-4. `cat`
-5. `wc`
-6. `ls`
-7. `grep`
-
-暂不优先：
-
-- `init`
-- `sh`
-- `usertests`
-- `nettests`
-- `mmaptest`
-
-原因：
-
-- 这些程序要么是系统启动关键路径
-- 要么覆盖面太广
-- 要么依赖额外资源与语义，不适合做 libc PoC 首批迁移
-
-## 15. 分阶段提交建议
-
-建议按下面的提交粒度推进：
-
-### Commit 1
-
-`refactor(user): harden crt0 entry`
-
-内容：
-
-- `_start` 增加 fallback loop
-- `crt0_main` 标记 `noreturn`
-
-### Commit 2
-
-`build(user): add picolibc experiment scaffolding`
-
-内容：
-
-- 新增 `user/pico/`
-- 新增 `picohello.c`
-- 新增 `user_pico.ld`
-- Makefile 增加 `PICOLIBC_EXPERIMENT` 链路
-
-### Commit 3
-
-`user: add raw syscall stubs for libc integration`
-
-内容：
-
-- 新增 `usys_pico.py`
-- 新增 `xv6_syscall_raw.h`
-- 生成 `__xv6_*` raw syscall
-
-### Commit 4
-
-`libc: add picolibc OS glue for xv6`
-
-内容：
-
-- 新增 `picolibc_os.c`
-- 跑通 `_exit/read/write/close/fstat/isatty/lseek/sbrk`
-
-### Commit 5
-
-`build(user): link picohello with picolibc`
-
-内容：
-
-- Makefile 接入外部 `picolibc` 产物
-- `_picohello` 成功链接
-
-### Commit 6
-
-`docs: record picolibc integration status`
-
-内容：
-
-- 记录当前可用接口
-- 记录已知限制
-- 记录最小验证方式
-
-## 16. 第一阶段完成标准
-
-认为第一阶段完成，需要同时满足：
+全部满足以下条件视为第一阶段完成：
 
 1. 默认 native 用户程序和测试入口不受影响
 2. `make PICOLIBC_EXPERIMENT=1 build` 能生成 `_picohello`
-3. `_picohello` 的 `readelf/nm` 检查通过
+3. `_picohello` 的 `readelf` / `nm` 检查通过
 4. `_picohello` 可在 xv6 shell 中运行
 5. `printf` 正常输出
 6. `malloc/free` 正常工作
 7. `main` 返回后能正确 `exit`
-
-## 17. 后续方向
-
-在第一阶段完成后，再继续做：
-
-- 更准确的 `fstat/stat` 转换
-- 文件 API 支持
-- `fopen/fread/fwrite/fclose`
-- `__libc_init_array` / `__libc_fini_array`
-- 简单 native 用户程序迁移
-- 评估是否需要更标准的 Unix 初始栈布局
-
-一句话路线图：
-
-先不替换系统 libc；先做独立的 `picolibc _picohello` 链路；用 `__xv6_*` raw syscall 隔离符号；用最小 OS glue 跑通 `printf/malloc/exit`；确认稳定后，再迁移简单用户程序。

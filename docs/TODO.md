@@ -6,9 +6,11 @@
 
 - 当前 `dev/all` 已整合 `util`、`syscall`、`pgtbl`、`traps`、`cow`、`thread`、`net`、`lock`、`fs`、`mmap`。
 - 当前活动 lab 配置仍是 `conf/lab.mk` 中的 `LAB=net`，用于保留 net 相关编译宏和 QEMU 网络配置；其他 lab 功能在 `dev/all` 中无条件集成。
-- 构建产物已统一输出到 `build/`，课程 grader 脚本已统一移动到 `graders/`，日常入口以 `make build`、`make image`、`make test-smoke`、`make regression`、`make grade-*` 为主；`make smoke` / `make test-smoke-go` 目前保留为兼容别名，`make smoke-py` 保留旧 Python 对照入口。
+- 构建产物已统一输出到 `build/`，课程 grader 脚本已统一移动到 `graders/`，日常入口以 `make build`、`make image`、`make test-quick`、`make test-smoke`、`make test-<lab>`、`make test-heavy`、`make test-all` 为主；`make smoke` / `make smoke-py` 保留为 legacy 对照。
+- Go runner 已完成 Phase 0~4 迁移（smoke 40 case、per-subsystem 9 suite、HostOnly 模式、heavy 排除、quick runner）。
+- 用户态已引入最小 `crt0` 运行时、ulibc 模块化拆分（`ustring.c` / `ufile.c` / `ugetpid.c`）、`usys.py` 替代 `usys.pl`。
+- `picolibc` PoC 实验链路已搭建（`user/pico/`），通过 `PICOLIBC_EXPERIMENT=1` 门控；阶段 0/1/2 完成（crt0 硬化、scaffold、raw `__xv6_*` syscall）；阶段 3（OS glue `picolibc_os.c`）是实现 `printf`/`malloc`/`exit` 真正跑通的前置条件，尚未落地。
 - 迁移历史与各 lab 取舍记录在 `docs/lab-migration-plan.md`；本文件只跟踪迁移完成后的后续工作。
-- 当前 Go smoke 已覆盖 util、syscall、pgtbl、traps、net、fs、mmap 的默认轻量 case，并默认避开外网 DNS；`make test-quick` 额外提供日常快速验证路径；完整重型回归仍应在阶段性合并前单独运行。
 
 ## 2. 已完成内容
 
@@ -112,6 +114,37 @@
   - 完成内容：`make qemu-net` / `make qemu-gdb-net` 显式递归传入 `NETFWD=1`，Go runner 的 net case 也直接传入 `NETFWD=1`，避免目标特定变量在被依赖 recipe 中失效。
   - 验证方式：`make --no-print-directory -n qemu-net QEMUEXTRA+=-snapshot` 包含 `hostfwd=udp::$(FWDPORT)-:2000`；`nettests-local` 在允许 UDP host forwarding 的环境中通过。
 
+### 2.5 用户态运行时与 libc 基线
+
+- [x] 建立最小用户态运行时入口（`crt0`）。
+  - 涉及模块：`user/crt0_entry.S`、`user/crt0.c`、多个 `user/*.c`、`Makefile`。
+  - 完成内容：新增 `_start -> crt0_main() -> main(argc, argv) -> exit(status)` 的最小启动路径；用户程序 ELF entry 统一改为 `_start`；`main` 签名统一为 `int main(int argc, char **argv)`；`_start` 后加兜底死循环；`crt0_main` 标记 `noreturn`。
+  - 验证方式：`make build`、`make image`、`make test-quick`、`make test-smoke`。
+- [x] 用户态 libc 模块化拆分。
+  - 涉及模块：`user/ustring.c`、`user/ufile.c`、`user/ugetpid.c`、`user/ulib.h`、`user/usyscall.h`、`user/usys.py`、`user/user.h`、`Makefile`。
+  - 完成内容：将原 `user/ulib.c` 按职责拆为字符串/内存（`ustring.c`）、文件 API（`ufile.c`）、快速 pid（`ugetpid.c`）；`usys.pl` 替换为 `usys.py`；头文件拆为 `ulib.h`（libc 声明）+ `usyscall.h`（syscall 声明）+ `user.h`（兼容聚合）。
+  - 验证方式：`make build`、`make test-quick`、`make test-smoke`。
+- [x] 建立 `picolibc` PoC 实验链路（阶段 0/1/2 完成）。
+  - 涉及模块：`user/pico/`（`crt0_entry.S`、`crt0.c`、`usys_pico.py`、`xv6_syscall_raw.h`、`user_pico.ld`、`picohello.c`）、`Makefile`、`docs/picolibc.md`。
+  - 完成内容：搭建独立 picolibc 链路并通过 `PICOLIBC_EXPERIMENT=1` 门控；crt0 硬化（noreturn + fallback loop）；`__xv6_*` raw syscall stub 生成；picohello 链接规则和 linker script 就绪。
+  - 剩余：阶段 3（OS glue `picolibc_os.c`）是实现 `printf`/`malloc`/`exit` 真正跑通的前置条件。
+  - 验证方式：`make build PICOLIBC_EXPERIMENT=1` 通过，链接产物可被 `readelf` 校验。
+- [x] exec/ELF 流程注释中文化与可读性重构。
+  - 涉及模块：`kernel/exec.c`、`kernel/elf.h`。
+  - 完成内容：`exec.c` 注释全中文化，提取 `open_exec`/`load_elf`/`setup_user_stack`/`save_proc_name`/`commit_exec` 五个 helper，6 步流程标注，变量重命名（`sz1`→`new_sz` 等）；`elf.h` ELF 结构体字段注释中文化；`ulib.c`/`printf.c`/`umalloc.c` 注释中文化 + 变量可读性优化。
+  - 验证方式：`make build`、`make test-quick`。
+- [x] Go runner 完成 Phase 2.5~4 迁移。
+  - 涉及模块：`tests/host/`、`Makefile`。
+  - 完成内容：HostOnly 模式实现（ph/barrier）；per-subsystem 9 suite 接入；heavy tag 默认排除；19 个 usertests subtest 接入 smoke；`test-quick` 极速验证路径；runner 稳定性修复（QEMU 非零退出不再掩盖、WaitGroup drain、outputMatches Reject 检查）。
+  - 验证方式：`make test-quick`、`make test-smoke`（40/40）、`make test-thread`、`make test-heavy`。
+
+### 2.6 文档与仓库约定
+
+- [x] 全面更新 `AGENTS.md`。
+  - 涉及模块：`AGENTS.md`。
+  - 完成内容：kernel 模块拆分表、user 双运行时链、完整 build/test/picolibc 命令、syscall 8 模块对照表、ulibc 文件拆分表、注释翻译与可读性 skill 约定、commit body 格式示例。
+  - 验证方式：与当前 `Makefile` 目标、文件结构一致。
+
 ## 3. 进行中 / 部分完成内容
 
 ### 3.1 VM fault path 整理
@@ -163,37 +196,26 @@
 ### 3.3 测试分层继续完善
 
 - [x] 完成 Go runner 与 Python smoke 的默认入口切换基线。
-  - 当前状态：`make test-smoke` 已作为默认轻量入口，`make smoke` / `make test-smoke-go` 作为兼容别名，`make smoke-py` 保留 Python 对照。
-  - 剩余工作：继续记录覆盖差异、耗时和少量不等价项，并观察默认 smoke 的稳定性。
-  - 涉及模块：`Makefile`、`tests/host/cmd/xv6test/`、`tests/host/internal/testrunner/`、`docs/test-migrate.md`、`README.md`。
-  - 验证方式：`make test-smoke`、`make smoke-py`，并检查没有残留 QEMU / `make server` 进程。
-		- [x] 补齐 Go runner 运行模式。
-		  - 当前状态：`QemuModeNormal`、`QemuModeNetForward`、`HostOnly` 均已实现；`ph` / `barrier` 以 HostOnly 模式接入 `make test-thread`；per-subsystem suites（thread/cow/traps/mmap/net/lock/fs）已接入 Go runner。
-		  - 涉及模块：`tests/host/internal/testrunner/`、`Makefile`、`notxv6/`。
-		  - 验证方式：`xv6test list --suite smoke --tags net`、`make test-net`、`make test-thread`。
-  - 当前状态：本地 UDP echo 路径保留在默认 smoke；DNS 检查已拆为非默认 case，可按标签单独运行。
-  - 剩余工作：后续可再决定将 DNS case 升级为独立 `net` suite。
-  - 涉及模块：`tests/host/internal/testrunner/suite.go`、`user/nettests.c`、`docs/test-migrate.md`。
+  - 当前状态：`make test-smoke` 已作为默认轻量入口（40 case），`make smoke` / `make smoke-py` 保留为 legacy 对照。
+  - 剩余工作：继续观察默认 smoke 的稳定性，记录覆盖差异。
+  - 验证方式：`make test-smoke`、`make smoke-py`。
+- [x] 补齐 Go runner 运行模式（Phase 2.5）。
+  - 当前状态：`QemuModeNormal`、`QemuModeNetForward`、`HostOnly` 均已实现；`ph` / `barrier` 以 HostOnly 模式接入；per-subsystem suites 已接入 9 个。
+  - 验证方式：`make test-thread`（含 HostOnly）、`make test-net`（含 NetForward）。
+- [x] 拆分 net smoke 与外部 DNS 测试。
+  - 当前状态：本地 UDP echo 路径保留在默认 smoke；DNS 检查已拆为非默认 case，可按 `--tags dns` 单独运行。
   - 验证方式：本地 net smoke 不依赖公网 DNS，DNS case 仍可单独运行。
-- [x] 细化 `make regression` 的覆盖范围。
-t- [x] 拆分 usertests 与重型测试分层（Phase 4）。
-t  - 当前状态：19 个轻量 usertests subtest 已接入 smoke suite；`usertests-full`、`bigfile`、`sbrkmuch` 标为 heavy；无显式 `--tags` 时默认跳过 heavy 标签 case；新增 `test-usertests`、`test-heavy` 入口。
-t  - 涉及模块：`tests/host/internal/testrunner/suite.go`、`tests/host/cmd/xv6test/main.go`、`Makefile`。
-t  - 验证方式：`make test-smoke` 含 40 case 不跑 heavy，`make test-heavy` 仅跑 heavy。
-  - 当前状态：`make regression` 已存在，当前依赖 `smoke grade-mmap grade-cow grade-traps`。
-  - 剩余工作：根据实际耗时决定是否加入 `grade-thread` 或定向 fs/lock 轻量项，同时避免默认触发 `bigfile` 和完整 `usertests`。
-  - 涉及模块：`Makefile`、`graders/`、`README.md`。
-  - 验证方式：记录 `make regression` 耗时，确认在日常开发可接受范围内。
+- [x] 拆分 usertests 与重型测试分层（Phase 4）。
+  - 当前状态：19 个轻量 usertests subtest 已接入 smoke；`usertests-full`、`bigfile`、`sbrkmuch` 标为 heavy；无显式 `--tags` 时所有 suite 默认跳过 heavy；新增 `make test-usertests`、`make test-heavy`。
+  - 验证方式：`make test-smoke` 不跑 heavy，`make test-heavy` 仅跑 heavy。
+- [x] 增加日常快速验证路径（`make test-quick`）。
+  - 当前状态：8 个低耗时 case，覆盖 util、syscall、pgtbl、cow、fs、mmap。
+  - 验证方式：`make test-quick` 稳定通过且明显快于 `make test-smoke`。
+- [x] 细化 `make regression` 覆盖范围。
 - [ ] 评估 per-suite QEMU 复用。
-  - 当前状态：Go runner 默认 per-case QEMU，隔离性强但启动成本更高；当前完整 Go smoke 最近耗时约 43 秒。
-  - 剩余工作：仅对明确无状态污染的轻量 case 评估 per-suite QEMU 复用，避免文件系统状态污染和失败恢复复杂化。
-  - 涉及模块：`tests/host/internal/testrunner/runner.go`、`docs/test-migrate.md`。
-  - 验证方式：比较 per-case 与 per-suite 的耗时、日志质量和失败隔离效果。
-- [x] 增加日常快速验证路径。
-  - 当前状态：`make test-quick` 已提供 8 个低耗时 case，覆盖 util、syscall、pgtbl、cow、fs、mmap。
-  - 剩余工作：观察其日常耗时与稳定性，再决定是否为 quick 单独引入 QEMU 复用。
-  - 涉及模块：`Makefile`、`tests/host/internal/testrunner/suite.go`、`README.md`、`AGENTS.md`。
-  - 验证方式：`make test-quick` 稳定通过，且明显快于 `make test-smoke`。
+  - 当前状态：Go runner 默认 per-case QEMU，隔离性强但启动成本更高。
+  - 剩余工作：仅对明确无状态污染的轻量 case 评估 per-suite QEMU 复用。
+  - 涉及模块：`tests/host/internal/testrunner/runner.go`。
 
 ## 4. 待完成内容
 
@@ -227,16 +249,12 @@ t  - 验证方式：`make test-smoke` 含 40 case 不跑 heavy，`make test-heav
 
 ### 4.2 中期任务
 
-- [ ] 规范化当前 `ulibc` / 用户态支持层。
-  - 要做什么：区分 syscall stub、启动代码、字符串/内存函数、printf、malloc、文件 API 包装，减少“一个文件混很多层”的状态，并补齐最小但一致的 C 运行时约定。
-  - 涉及模块：`user/ulib.c`、`user/printf.c`、`user/umalloc.c`、`user/user.h`、`user/usys.pl`。
-  - 为什么要做：`crt0` 已经落地，这一步可以继续把 syscall stub、启动代码和 libc 基础函数的边界拆清，也更能暴露 xv6 当前 syscall ABI、errno 约定、fd 语义和内存分配接口到底缺什么。
-  - 如何验证：`make build`、`make test-quick`、`make test-smoke`，并确认用户程序二进制大小和行为没有异常回归。
-- [ ] 评估桥接简化 libc（例如 `newlib`）的最小可行路径。
-  - 要做什么：在 `crt0` 和 `ulibc` 边界稳定后，盘点 `newlib` 所需的 syscall/ABI 适配层，例如 `_sbrk`、`_write`、`_read`、`_close`、`_fstat`、`_isatty`、`_lseek`、`_exit`，以及 `errno`、reentrancy、初始化顺序等问题。
-  - 涉及模块：用户态启动代码、syscall ABI、fd 语义、内存分配接口，可能新增独立 compatibility layer。
-  - 为什么要做：直接桥接 `newlib` 不难编译，但很容易把不清晰的 syscall 约定和运行时缺口一起放大；应在边界清楚后再做。
-  - 如何验证：先实现最小 hello/stdio 场景，再逐步验证 `malloc`、文件 I/O、参数传递和错误路径。
+- [x] 规范化当前 ulibc / 用户态支持层。
+  - 当前状态：已完成 `crt0` 启动路径、ulibc 模块化拆分（`ustring.c`/`ufile.c`/`ugetpid.c`）、`usys.py` 替换 `usys.pl`、头文件拆为 `ulib.h`+`usyscall.h`+`user.h`。
+  - 验证方式：`make build`、`make test-quick`、`make test-smoke`。
+- [ ] 补齐 picolibc OS glue 并跑通 picohello（替代原 newlib 计划）。
+  - 当前状态：`user/pico/` 目录已建立独立 picolibc 链路，通过 `PICOLIBC_EXPERIMENT=1` 门控；阶段 0/1/2 完成；阶段 3（OS glue `picolibc_os.c`）是实现 `printf`/`malloc`/`exit` 真正跑通的前置条件，尚未落地。详见 `docs/picolibc.md`。
+  - 剩余工作：实现 `__xv6_*` → POSIX glue（`_exit`/`write`/`read`/`sbrk`/`fstat`/`lseek`/`isatty`），然后逐步扩展 picolibc 覆盖范围。
 - [ ] 重构 VMA 管理模块。
   - 要做什么：将 VMA 查找、分配、拆分、写回、清理逻辑从 `kernel/proc.c` 中拆出，形成更清晰的模块边界。
   - 涉及模块：`kernel/proc.c`、`kernel/proc.h`、可能新增 `kernel/mmap.c` 或 `kernel/vma.c`、`Makefile`。
@@ -297,16 +315,17 @@ t  - 验证方式：`make test-smoke` 含 40 case 不跑 heavy，`make test-heav
 
 ### 5.2 日常轻量回归
 
-- [ ] 运行 `make smoke`。
-  - 覆盖内容：`util`、`syscall`、`net`、`pgtbl`、`traps`、`symlinktest`、`mmaptest`。
+- [ ] 运行 `make test-quick`（最快，8 case）。
+- [ ] 运行 `make test-smoke`（提交前，40 case）。
+  - 覆盖内容：`util`、`syscall`、`net`、`pgtbl`、`traps`、`thread`、`cow`、`fs`、`mmap`、19 个 usertests subtest。
   - 适用场景：文档、Makefile、用户态工具、小范围内核改动。
-- [ ] 运行与改动模块对应的定向 grader。
-  - VM / COW：`make grade-cow`。
-  - mmap：`make grade-mmap`。
-  - traps / alarm：`make grade-traps`。
-  - FS：`make grade-fs`。
-  - lock / bcache：`make grade-lock`。
-  - thread host 工具：`make grade-thread`。
+- [ ] 运行与改动模块对应的定向测试。
+  - VM / COW：`make test-cow`。
+  - mmap：`make test-mmap`。
+  - traps / alarm：`make test-traps`。
+  - FS：`make test-fs`。
+  - lock / bcache：`make test-lock`。
+  - thread：`make test-thread`。
 
 ### 5.3 中等与重型回归
 

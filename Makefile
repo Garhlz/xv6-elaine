@@ -265,7 +265,7 @@ $(PICO_BUILD)/usys_pico.S: $(U)/pico/usys_pico.py | $(PICO_BUILD)
 $(PICO_BUILD)/usys_pico.o: $(PICO_BUILD)/usys_pico.S | $(PICO_BUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(UBUILD)/_picohello: $(PICO_OBJS) $(PICO_BUILD)/picohello.o $(U)/pico/user_pico.ld | $(UBUILD)
+$(UBUILD)/_picohello: $(PICO_OBJS) $(PICO_BUILD)/picohello.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
 	$(CC) $(CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picohello.o $(PICOLIBC_LIBS) $(LIBGCC)
 	$(OBJDUMP) -S $@ > $(UBUILD)/picohello.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picohello.sym

@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-int __xv6_exit(int status) __attribute__((noreturn));
+void __xv6_exit(int status) __attribute__((noreturn));
 int __xv6_read(int fd, void *buf, int n);
 int __xv6_write(int fd, const void *buf, int n);
 int __xv6_close(int fd);

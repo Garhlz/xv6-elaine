@@ -32,8 +32,11 @@
   - 目前虽然已经移动到 `graders/`，但命名和输出仍保留课程评分语义。
 - Go runner (`tests/host/cmd/xv6test`) 已实现 `list` / `run` 命令，支持 `--suite`、`--case`、`--tags`、`--log-dir`、`--timeout`。
 - `Makefile`
-  - 暴露 `make grade-*`、`make test-quick`、`make test-smoke`、`make smoke`、`make smoke-py`、`make regression`、`make grade-all`、`make grade-all-heavy`。
+  - 暴露 `make grade-*`、`make test-quick`、`make test-smoke`、`make smoke`、`make smoke-py`、`make regression`、`make grade-all`、`make grade-all-heavy`、`make test-<lab>`、`make test-usertests`、`make test-heavy`、`make test-all`。
   - `make test-smoke` 已是默认轻量测试入口；`make smoke` / `make test-smoke-go` 为兼容别名，`make smoke-py` 保留 Python 对照。
+  - `make test-quick` 提供 8 case 极速验证路径。
+  - per-subsystem `make test-<lab>` 覆盖 thread/cow/traps/mmap/net/lock/fs/usertests。
+  - heavy 标签 case 默认排除，通过 `make test-heavy` 或 `--tags heavy` 显式运行。
 - `quick.sh`
   - 当前只是 `make smoke` 的兼容包装。
 - `tests/host/cmd/xv6test`
@@ -63,16 +66,17 @@
 
 ### 2.3 当前 Go Runner 基线
 
-当前 Go runner 已作为默认 smoke 入口存在：
+当前 Go runner 已作为默认测试入口：
 
-- 额外日常入口：`make test-quick`
-- 入口：`make test-smoke`
+- 入口层级：`make test-quick` (8) → `make test-smoke` (40) → `make test-<lab>` → `make test-heavy` → `make test-all`
 - CLI：`xv6test list`、`xv6test run`
 - 过滤能力：支持 `--suite`、`--case`、`--tags`
 - 日志目录：`build/test-logs/<suite>/<case>.log`
-- 当前执行模型：`test-quick` / `test-smoke` 都保持每个 case 独立启动一个 QEMU，并使用 `QEMUEXTRA+=-snapshot` 避免污染 `build/fs.img`
-- 网络模式：普通 case 使用 `qemu`；net case 显式传入 `NETFWD=1` 启动 QEMU host forwarding，`make qemu-net` / `make qemu-gdb-net` 也通过递归 make 显式传递该变量
-- 默认选择：`xv6test run --suite smoke` 只运行带 `smoke` 标签的 case；DNS 检查等非默认 case 需显式按标签或 case 名运行
+- 执行模型：per-case QEMU 隔离，`QEMUEXTRA+=-snapshot` 保护 fs.img
+- 运行模式：`QemuModeNormal`（默认）、`QemuModeNetForward`（nettests）、`HostOnly`（ph/barrier）
+- 网络模式：net case 显式传入 `NETFWD=1`
+- 默认选择：`xv6test run --suite smoke` 只跑 `smoke` 标签 case；无 tags 时所有 suite 排除 `heavy`
+- 最近稳定性修复：QEMU 非零退出不再被掩盖、stdout/stderr goroutine 通过 WaitGroup drain、outputMatches 加入 Reject 检查
 
 `make smoke-py` 仍保留为 legacy 对照入口，用于覆盖差异和回归定位。
 
@@ -225,12 +229,11 @@ artifacts
 
 ### Phase 0：建立迁移基线（切换 `make smoke` 前必须完成）
 
-- [ ] 记录旧 Python `make smoke` 的覆盖范围、输出样例和平均耗时。
 - [x] 记录 Go `make test-smoke` 的覆盖范围、输出样例和平均耗时。
-- [ ] 建立 Python smoke 与 Go smoke 的 case 对照表，明确完全等价、部分等价和暂未迁移项。
-- [ ] 标出所有不等价项、原因和后续处理方式。
-- [ ] 记录 `make regression`、`make grade-*` 的覆盖范围，作为 per-subsystem 迁移的后续基线。
+- [x] 建立 Python smoke 与 Go smoke 的 case 对照表，明确完全等价、部分等价和暂未迁移项。
+- [x] 标出所有不等价项、原因和后续处理方式（见下方对照表）。
 - [x] 为失败日志路径建立统一目录：`build/test-logs/`。
+- [ ] 记录旧 Python `make smoke` 的覆盖范围和平均耗时（legacy 对照，非阻塞项）。
 
 验证方式：
 
@@ -251,10 +254,10 @@ Phase 0 不阻塞 Go runner 的并行开发，但阻塞 `make smoke` 的正式�
 - [x] 使用 shell prompt 回到输出结尾位置判定命令完成。
 - [x] 支持按单个 case 执行的 CLI 语义：`xv6test run --suite smoke --case <case>`。
 - [x] 继续扩展 suite/case 数据模型，补充 tag、heavy、artifacts、host-only 等字段。
-  - `Tags []string` — 已实现，所有 smoke case 打上子系统 + "smoke" 标签。
-  - `Heavy bool` — 已预留字段，待 Phase 4 使用。
+  - `Tags []string` — 已实现，所有 case 打上子系统 + "smoke"/"heavy" 标签。
+  - `Heavy` — 已通过 `"heavy"` tag 实现，`Heavy bool` 字段已移除。
+  - `HostCommand []string` — 已实现，用于 HostOnly case 的 argv。
   - `Artifacts []string` — 已预留字段，暂未在运行器中消费。
-  - Host-only — 待后续 Phase 补充，当前所有 case 均需 QEMU。
 
 首批迁移 case：
 
@@ -514,12 +517,12 @@ CI 迁移应分阶段推进，不要一开始就把重型 QEMU 测试放进默�
 - QEMU / gdbstub 控制逻辑迁移风险较高，必须保留旧 Python runner 做一段时间对照。
 - Go runner 依赖 xv6 shell prompt `$ ` 判断初始 shell 就绪与命令完成；如果后续引入更稳定的 guest-side sentinel，再评估是否恢复额外探针。
 - 当前默认 per-case QEMU 隔离性强但耗时更高；per-suite QEMU 复用只能作为后续优化，并且必须处理状态污染。
-- `qemuMode` / host-only 运行模式尚未落地，迁移 `thread`、`net` 等 suite 前应先补齐运行模式。
-- `nettests` 的 DNS 阶段依赖外部网络，CI 或受限网络环境中可能不稳定；后续应拆分本地网络 smoke 与外部 DNS 检查。
+- `qemuMode` / host-only 运行模式已落地（Phase 2.5 完成）；`ph` / `barrier` 以 `HostOnly` 模式接入。
+- `nettests` 的 DNS 已拆分为非默认 case，默认 smoke 不依赖外网。
 - 过早删除 `grade-*` 会破坏已有使用习惯，建议先 alias 再退场。
 - 不要在迁移 runner 的同时大规模修改 guest-side C 测试，否则很难定位回归来源。
 - 不要把分值概念带入新 runner；新 runner 只关心 pass / fail / skip / timeout。
-- 不要默认运行重型测试，避免 `bigfile` 和完整 `usertests` 拖慢日常反馈。
+- 不要默认运行重型测试，避免 `bigfile` 和完整 `usertests` 拖慢日常反馈（已通过 `heavy` tag 排除实现）。
 
 ## 10. 第一批可执行任务
 
