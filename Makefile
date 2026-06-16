@@ -285,8 +285,8 @@ QEMUOPTS += $(QEMUEXTRA)
 qemu: $(KERNEL) image
 	$(QEMU) $(QEMUOPTS)
 
-qemu-net: NETFWD=1
-qemu-net: qemu
+qemu-net:
+	$(MAKE) qemu NETFWD=1
 
 $(GDBINIT): .gdbinit.tmpl-riscv | $(BUILD)
 	sed "s/:1234/:$(GDBPORT)/" < $^ > $@
@@ -295,8 +295,8 @@ qemu-gdb: $(KERNEL) image $(GDBINIT)
 	@echo "*** Now run 'gdb' in another window." 1>&2
 	$(QEMU) $(QEMUOPTS) -S $(QEMUGDB)
 
-qemu-gdb-net: NETFWD=1
-qemu-gdb-net: qemu-gdb
+qemu-gdb-net:
+	$(MAKE) qemu-gdb NETFWD=1
 
 # try to generate a unique port for the echo server
 SERVERPORT = $(shell expr `id -u` % 5000 + 25099)
@@ -345,6 +345,9 @@ smoke-py: $(KERNEL) image
 	$(GRADER_DIR)/grade-lab-traps --no-make $(GRADEFLAGS)
 	python3 -c 'import types, gradelib; from gradelib import *; gradelib.options = types.SimpleNamespace(verbose=False, no_make=True, color="never"); r = Runner(); r.run_qemu(shell_script(["symlinktest"]), timeout=30); r.match("^test symlinks: ok$$"); r.match("^test concurrent symlinks: ok$$"); print("fs symlink smoke: OK")'
 	python3 -c 'import types, gradelib; from gradelib import *; gradelib.options = types.SimpleNamespace(verbose=False, no_make=True, color="never"); r = Runner(); r.run_qemu(shell_script(["mmaptest"]), timeout=60); r.match("^mmaptest: all tests succeeded$$"); print("mmap smoke: OK")'
+
+test-quick: $(KERNEL) image
+	$(XV6TEST) run --suite quick
 
 test-smoke: $(KERNEL) image
 	$(XV6TEST) run --suite smoke
@@ -434,5 +437,5 @@ grade-all:
 	$(GRADER_DIR)/grade-lab-mmap --no-make $(GRADEFLAGS)
 
 .PHONY: build image clean tags qemu qemu-net qemu-gdb qemu-gdb-net server ping print-gdbport \
-	grade $(addprefix grade-,$(GRADE_LABS)) smoke smoke-py test-smoke test-smoke-go test-smoke-util test-smoke-syscall test-smoke-pgtbl test-smoke-traps test-smoke-net test-smoke-fs test-smoke-mmap test-smoke-cow test-smoke-thread \
+	grade $(addprefix grade-,$(GRADE_LABS)) smoke smoke-py test-quick test-smoke test-smoke-go test-smoke-util test-smoke-syscall test-smoke-pgtbl test-smoke-traps test-smoke-net test-smoke-fs test-smoke-mmap test-smoke-cow test-smoke-thread \
 	test-thread test-cow test-traps test-mmap test-net test-lock test-fs test-usertests test-heavy test-all regression grade-all grade-all-heavy ph barrier

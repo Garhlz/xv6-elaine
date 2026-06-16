@@ -32,7 +32,7 @@
   - 目前虽然已经移动到 `graders/`，但命名和输出仍保留课程评分语义。
 - Go runner (`tests/host/cmd/xv6test`) 已实现 `list` / `run` 命令，支持 `--suite`、`--case`、`--tags`、`--log-dir`、`--timeout`。
 - `Makefile`
-  - 暴露 `make grade-*`、`make test-smoke`、`make smoke`、`make smoke-py`、`make regression`、`make grade-all`、`make grade-all-heavy`。
+  - 暴露 `make grade-*`、`make test-quick`、`make test-smoke`、`make smoke`、`make smoke-py`、`make regression`、`make grade-all`、`make grade-all-heavy`。
   - `make test-smoke` 已是默认轻量测试入口；`make smoke` / `make test-smoke-go` 为兼容别名，`make smoke-py` 保留 Python 对照。
 - `quick.sh`
   - 当前只是 `make smoke` 的兼容包装。
@@ -65,12 +65,13 @@
 
 当前 Go runner 已作为默认 smoke 入口存在：
 
+- 额外日常入口：`make test-quick`
 - 入口：`make test-smoke`
 - CLI：`xv6test list`、`xv6test run`
 - 过滤能力：支持 `--suite`、`--case`、`--tags`
 - 日志目录：`build/test-logs/<suite>/<case>.log`
-- 当前执行模型：每个 case 独立启动一个 QEMU，并使用 `QEMUEXTRA+=-snapshot` 避免污染 `build/fs.img`
-- 网络模式：支持普通 `qemu` 与带 host forwarding 的 `qemu-net`
+- 当前执行模型：`test-quick` / `test-smoke` 都保持每个 case 独立启动一个 QEMU，并使用 `QEMUEXTRA+=-snapshot` 避免污染 `build/fs.img`
+- 网络模式：普通 case 使用 `qemu`；net case 显式传入 `NETFWD=1` 启动 QEMU host forwarding，`make qemu-net` / `make qemu-gdb-net` 也通过递归 make 显式传递该变量
 - 默认选择：`xv6test run --suite smoke` 只运行带 `smoke` 标签的 case；DNS 检查等非默认 case 需显式按标签或 case 名运行
 
 `make smoke-py` 仍保留为 legacy 对照入口，用于覆盖差异和回归定位。
@@ -193,7 +194,7 @@ artifacts
 
 ### 4.4 命令注入与完成判定
 
-当前 Go runner 先等待 xv6 shell 初始 prompt `$ ` 就绪，再逐条发送命令。每条命令发送后，runner 等待 shell prompt 再次回到输出结尾位置，然后才发送下一条命令。完成后在完整输出上做 `expect`、`count`、`distinct` 和 `reject` 检查。
+当前 Go runner 先等待 xv6 shell 初始 prompt `$ ` 就绪，再逐条发送命令。非末尾命令发送后，runner 等待 shell prompt 再次回到输出结尾位置，然后才发送下一条命令。最后一条命令满足匹配条件后，再经过一个很短的 settle window，避免 prompt 后迟到输出被过早截断；这也覆盖 `usertests <case>` 这类打印 OK 后不稳定回到 prompt 的单项测试。完成后在完整输出上做 `expect`、`count`、`distinct` 和 `reject` 检查。
 
 当前实现选择 prompt 收尾而不是额外的 sentinel 命令，原因是仓库当前 xv6 用户态环境中 `echo <arg>` 路径并不稳定；如果继续依赖附加 sentinel，会把 legacy `echo` 问题误判成 runner 问题。
 

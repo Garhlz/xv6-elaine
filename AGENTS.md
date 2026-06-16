@@ -24,6 +24,7 @@ Follow `.editorconfig`: LF endings, final newline, spaces by default, 4-space in
 The repository uses layered test targets. Prefer the lightest target that covers your change:
 
 - **Small / build-only changes**: `make build && make image`
+- **Fast daily loop**: `make test-quick`
 - **Before every commit**: `make test-smoke` (`make smoke` is now a compatibility alias)
 - **Subsystem changes**: `make test-<lab>` (e.g. `make test-mmap`, `make test-fs`) or `make grade-<lab>` for Python grader comparison
 - **Stage/merge regression**: `make test-heavy` (only heavy cases) or `make grade-all-heavy` (full heavy suite)

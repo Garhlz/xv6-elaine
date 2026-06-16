@@ -27,7 +27,6 @@ const (
 //	Count       — 输出中某 regex 必须出现的次数约束
 //	Reject      — 不允许在输出中出现的 regex 模式列表
 //	Tags        — 分类标签，如 "util", "syscall", "smoke", "heavy"
-//	Heavy       — 是否属于重型测试（默认不跑）
 //	Artifacts   — 失败时额外保存的文件路径（相对于仓库根目录）
 type Case struct {
 	Name        string
@@ -64,13 +63,13 @@ func BuiltinSuites() map[string]Suite {
 		Name: "smoke",
 		Cases: []Case{
 			{
-				Name:       "sleep-no-arguments",
-				Commands:   []string{"sleep"},
-				Expect:     []string{`(?m)^usage: sleep ticks$`},
-				Reject:     commonRejects(),
-				Tags:       []string{"util", "smoke"},
-				Timeout:    30 * time.Second,
-				QemuMode:   QemuModeNormal,
+				Name:     "sleep-no-arguments",
+				Commands: []string{"sleep"},
+				Expect:   []string{`(?m)^usage: sleep ticks$`},
+				Reject:   commonRejects(),
+				Tags:     []string{"util", "smoke"},
+				Timeout:  30 * time.Second,
+				QemuMode: QemuModeNormal,
 			},
 			{
 				Name:     "sleep-returns",
@@ -79,10 +78,10 @@ func BuiltinSuites() map[string]Suite {
 					`(?m)^\d+: received ping$`,
 					`(?m)^\d+: received pong$`,
 				},
-				Reject:     commonRejects(),
-				Tags:       []string{"util", "smoke"},
-				Timeout:    30 * time.Second,
-				QemuMode:   QemuModeNormal,
+				Reject:   commonRejects(),
+				Tags:     []string{"util", "smoke"},
+				Timeout:  30 * time.Second,
+				QemuMode: QemuModeNormal,
 			},
 			{
 				Name:     "pingpong",
@@ -588,13 +587,111 @@ func BuiltinSuites() map[string]Suite {
 	}
 	usertests.Cases = append(usertestsSmokeCases(), usertests.Cases...)
 
+	quick := Suite{
+		Name: "quick",
+		Cases: []Case{
+			{
+				Name:     "pingpong",
+				Commands: []string{"pingpong"},
+				Expect: []string{
+					`(?m)^\d+: received ping$`,
+					`(?m)^\d+: received pong$`,
+				},
+				Reject:   commonRejects(),
+				Tags:     []string{"quick", "util"},
+				Timeout:  20 * time.Second,
+				QemuMode: QemuModeNormal,
+			},
+			{
+				Name:     "primes",
+				Commands: []string{"primes"},
+				Expect: []string{
+					`(?m)^prime 2$`, `(?m)^prime 3$`, `(?m)^prime 5$`,
+					`(?m)^prime 7$`, `(?m)^prime 11$`, `(?m)^prime 13$`,
+					`(?m)^prime 17$`, `(?m)^prime 19$`, `(?m)^prime 23$`,
+					`(?m)^prime 29$`, `(?m)^prime 31$`,
+				},
+				Reject:   commonRejects(),
+				Tags:     []string{"quick", "util"},
+				Timeout:  20 * time.Second,
+				QemuMode: QemuModeNormal,
+			},
+			{
+				Name:     "trace-nothing",
+				Commands: []string{"grep hello README"},
+				Reject:   append(commonRejects(), `(?m)^.* syscall .*$`),
+				Tags:     []string{"quick", "syscall"},
+				Timeout:  20 * time.Second,
+				QemuMode: QemuModeNormal,
+			},
+			{
+				Name:     "sysinfotest",
+				Commands: []string{"sysinfotest"},
+				Expect:   []string{`(?m)^sysinfotest: OK$`},
+				Reject:   append(commonRejects(), `(?m)^.* FAIL .*$`),
+				Tags:     []string{"quick", "syscall"},
+				Timeout:  20 * time.Second,
+				QemuMode: QemuModeNormal,
+			},
+			{
+				Name:     "cowtest",
+				Commands: []string{"cowtest"},
+				Expect: []string{
+					`(?m)^simple: ok$`,
+					`(?m)^three: ok$`,
+					`(?m)^file: ok$`,
+					`(?m)^ALL COW TESTS PASSED$`,
+				},
+				Reject:   commonRejects(),
+				Tags:     []string{"quick", "cow"},
+				Timeout:  40 * time.Second,
+				QemuMode: QemuModeNormal,
+			},
+			{
+				Name:     "pgtbltest",
+				Commands: []string{"pgtbltest"},
+				Expect: []string{
+					`(?m)^ugetpid_test: OK$`,
+					`(?m)^pgaccess_test: OK$`,
+					`(?m)^pgtbltest: all tests succeeded$`,
+				},
+				Reject:   append(commonRejects(), `(?m)^pgtbltest: .* failed:`),
+				Tags:     []string{"quick", "pgtbl"},
+				Timeout:  30 * time.Second,
+				QemuMode: QemuModeNormal,
+			},
+			{
+				Name:     "symlinktest",
+				Commands: []string{"symlinktest"},
+				Expect: []string{
+					`(?m)^test symlinks: ok$`,
+					`(?m)^test concurrent symlinks: ok$`,
+				},
+				Reject:   commonRejects(),
+				Tags:     []string{"quick", "fs"},
+				Timeout:  20 * time.Second,
+				QemuMode: QemuModeNormal,
+			},
+			{
+				Name:     "mmaptest",
+				Commands: []string{"mmaptest"},
+				Expect:   []string{`(?m)^mmaptest: all tests succeeded$`},
+				Reject:   append(commonRejects(), `(?m)^mmaptest: .* failed`),
+				Tags:     []string{"quick", "mmap"},
+				Timeout:  40 * time.Second,
+				QemuMode: QemuModeNormal,
+			},
+		},
+	}
+
 	return map[string]Suite{
-		smoke.Name:  smoke,
-		thread.Name: thread,
-		cow.Name:    cow,
-		traps.Name:  traps,
-		mmap.Name:   mmap,
-		net.Name:    net,
+		smoke.Name:     smoke,
+		quick.Name:     quick,
+		thread.Name:    thread,
+		cow.Name:       cow,
+		traps.Name:     traps,
+		mmap.Name:      mmap,
+		net.Name:       net,
 		lock.Name:      lock,
 		fs.Name:        fs,
 		usertests.Name: usertests,
@@ -603,25 +700,25 @@ func BuiltinSuites() map[string]Suite {
 
 func usertestsSmokeCases() []Case {
 	return []Case{
-		{Name: "pipe1", Commands: []string{"usertests pipe1"}, Expect: []string{`(?m)^test pipe1: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "exitwait", Commands: []string{"usertests exitwait"}, Expect: []string{`(?m)^test exitwait: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "opentest", Commands: []string{"usertests opentest"}, Expect: []string{`(?m)^test opentest: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "writetest", Commands: []string{"usertests writetest"}, Expect: []string{`(?m)^test writetest: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "createtest", Commands: []string{"usertests createtest"}, Expect: []string{`(?m)^test createtest: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "dirtest", Commands: []string{"usertests dirtest"}, Expect: []string{`(?m)^test dirtest: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "exectest", Commands: []string{"usertests exectest"}, Expect: []string{`(?m)^test exectest: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "killstatus", Commands: []string{"usertests killstatus"}, Expect: []string{`(?m)^test killstatus: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "preempt", Commands: []string{"usertests preempt"}, Expect: []string{`(?m)^test preempt:.*OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 60 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "sbrkbasic", Commands: []string{"usertests sbrkbasic"}, Expect: []string{`(?m)^test sbrkbasic: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "sbrkarg", Commands: []string{"usertests sbrkarg"}, Expect: []string{`(?m)^test sbrkarg: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "bsstest", Commands: []string{"usertests bsstest"}, Expect: []string{`(?m)^test bsstest: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "copyin", Commands: []string{"usertests copyin"}, Expect: []string{`(?m)^test copyin: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "copyout", Commands: []string{"usertests copyout"}, Expect: []string{`(?m)^test copyout: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "bigargtest", Commands: []string{"usertests bigargtest"}, Expect: []string{`(?m)^test bigargtest: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "linktest", Commands: []string{"usertests linktest"}, Expect: []string{`(?m)^test linktest: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "truncate1", Commands: []string{"usertests truncate1"}, Expect: []string{`(?m)^test truncate1: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "argptest", Commands: []string{"usertests argptest"}, Expect: []string{`(?m)^test argptest: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
-		{Name: "fourteen", Commands: []string{"usertests fourteen"}, Expect: []string{`(?m)^test fourteen: OK$`, `(?m)^ALL TESTS PASSED$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "pipe1", Commands: []string{"usertests pipe1"}, Expect: []string{`(?m)^test pipe1: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "exitwait", Commands: []string{"usertests exitwait"}, Expect: []string{`(?m)^test exitwait: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "opentest", Commands: []string{"usertests opentest"}, Expect: []string{`(?m)^test opentest: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "writetest", Commands: []string{"usertests writetest"}, Expect: []string{`(?m)^test writetest: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "createtest", Commands: []string{"usertests createtest"}, Expect: []string{`(?m)^test createtest: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "dirtest", Commands: []string{"usertests dirtest"}, Expect: []string{`(?m)^test dirtest: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "exectest", Commands: []string{"usertests exectest"}, Expect: []string{`(?m)^test exectest: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "killstatus", Commands: []string{"usertests killstatus"}, Expect: []string{`(?m)^test killstatus: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 60 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "preempt", Commands: []string{"usertests preempt"}, Expect: []string{`(?m)^test preempt:.*OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 60 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "sbrkbasic", Commands: []string{"usertests sbrkbasic"}, Expect: []string{`(?m)^test sbrkbasic: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "sbrkarg", Commands: []string{"usertests sbrkarg"}, Expect: []string{`(?m)^test sbrkarg: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "bsstest", Commands: []string{"usertests bsstest"}, Expect: []string{`(?m)^test bsstest: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "copyin", Commands: []string{"usertests copyin"}, Expect: []string{`(?m)^test copyin: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "copyout", Commands: []string{"usertests copyout"}, Expect: []string{`(?m)^test copyout: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "bigargtest", Commands: []string{"usertests bigargtest"}, Expect: []string{`(?m)^test bigargtest: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "linktest", Commands: []string{"usertests linktest"}, Expect: []string{`(?m)^test linktest: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "truncate1", Commands: []string{"usertests truncate1"}, Expect: []string{`(?m)^test truncate1: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "argptest", Commands: []string{"usertests argptest"}, Expect: []string{`(?m)^test argptest: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
+		{Name: "fourteen", Commands: []string{"usertests fourteen"}, Expect: []string{`(?m)^test fourteen: OK$`}, Reject: commonRejects(), Tags: []string{"usertests", "smoke"}, Timeout: 30 * time.Second, QemuMode: QemuModeNormal},
 	}
 }
 

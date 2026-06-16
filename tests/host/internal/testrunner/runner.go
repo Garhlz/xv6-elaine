@@ -19,6 +19,8 @@ type Runner struct {
 	LogDir string
 }
 
+const successSettleWindow = 200 * time.Millisecond
+
 type Result struct {
 	Duration time.Duration
 	LogPath  string
@@ -92,22 +94,26 @@ func runHostOnlyCase(tc Case, output *safeBuffer) error {
 		done <- cmd.Wait()
 	}()
 
+	var wg sync.WaitGroup
 	defer func() {
 		killProcessGroup(cmd)
 		select {
 		case <-done:
 		case <-time.After(3 * time.Second):
 		}
+		wg.Wait()
 	}()
 
-	go copyOutput(output, stdout)
-	go copyOutput(output, stderr)
+	wg.Add(2)
+	go func() { defer wg.Done(); copyOutput(output, stdout) }()
+	go func() { defer wg.Done(); copyOutput(output, stderr) }()
 
 	timer := time.NewTimer(tc.Timeout)
 	defer timer.Stop()
 
 	select {
 	case err := <-done:
+		wg.Wait()
 		return err
 	case <-timer.C:
 		return fmt.Errorf("timeout after %s", tc.Timeout)
@@ -126,11 +132,12 @@ func runQEMUCase(tc Case, output *safeBuffer) error {
 	defer stopBackground(background)
 
 	qemuTarget := "qemu"
+	qemuArgs := []string{"--no-print-directory", qemuTarget, "QEMUEXTRA+=-snapshot"}
 	if tc.QemuMode == QemuModeNetForward {
-		qemuTarget = "qemu-net"
+		qemuArgs = []string{"--no-print-directory", "qemu", "NETFWD=1", "QEMUEXTRA+=-snapshot"}
 	}
 
-	cmd := exec.Command("make", "--no-print-directory", qemuTarget, "QEMUEXTRA+=-snapshot")
+	cmd := exec.Command("make", qemuArgs...)
 	cmd.SysProcAttr = processGroupAttr()
 
 	stdout, err := cmd.StdoutPipe()
@@ -155,50 +162,93 @@ func runQEMUCase(tc Case, output *safeBuffer) error {
 		done <- cmd.Wait()
 	}()
 
+	stopReaders := make(chan struct{})
+	var wg sync.WaitGroup
 	defer func() {
+		close(stopReaders)
 		killProcessGroup(cmd)
 		_ = stdin.Close()
 		select {
 		case <-done:
 		case <-time.After(3 * time.Second):
 		}
+		wg.Wait()
 	}()
 
 	events := make(chan string, 128)
 	readOutput := func(reader io.Reader) {
+		defer wg.Done()
 		buf := make([]byte, 4096)
 		for {
 			n, readErr := reader.Read(buf)
 			if n > 0 {
 				chunk := string(buf[:n])
 				output.WriteString(chunk)
-				events <- chunk
+				select {
+				case events <- chunk:
+				case <-stopReaders:
+					return
+				}
 			}
 			if readErr != nil {
 				return
 			}
 		}
 	}
+	wg.Add(2)
 	go readOutput(stdout)
 	go readOutput(stderr)
 
 	timer := time.NewTimer(tc.Timeout)
 	defer timer.Stop()
+	var settleTimer *time.Timer
+	var settleChan <-chan time.Time
+	stopSettleTimer := func() {
+		if settleTimer == nil {
+			return
+		}
+		if !settleTimer.Stop() {
+			select {
+			case <-settleTimer.C:
+			default:
+			}
+		}
+		settleChan = nil
+	}
+	armSettleTimer := func() {
+		if settleTimer == nil {
+			settleTimer = time.NewTimer(successSettleWindow)
+		} else {
+			if !settleTimer.Stop() {
+				select {
+				case <-settleTimer.C:
+				default:
+				}
+			}
+			settleTimer.Reset(successSettleWindow)
+		}
+		settleChan = settleTimer.C
+	}
+	defer stopSettleTimer()
 
 	var transcript strings.Builder
 	nextCommand := 0
 	waitingForPrompt := true
 	waitingForCommand := false
-	sentAll := false
 	for {
 		select {
 		case err := <-done:
-			if err != nil && !sentAll {
-				return fmt.Errorf("qemu exited before commands completed: %w", err)
+			if err == nil {
+				return fmt.Errorf("qemu exited before test passed")
 			}
-			return nil
+			return fmt.Errorf("qemu exited before test passed: %w", err)
 		case <-timer.C:
 			return fmt.Errorf("timeout after %s", tc.Timeout)
+		case <-settleChan:
+			if nextCommand == len(tc.Commands) && outputMatches(tc, output.String()) {
+				return nil
+			}
+			stopSettleTimer()
 		case chunk := <-events:
 			transcript.WriteString(chunk)
 			if waitingForPrompt && strings.Contains(transcript.String(), "$ ") {
@@ -221,10 +271,11 @@ func runQEMUCase(tc Case, output *safeBuffer) error {
 					nextCommand++
 				}
 			}
-			if nextCommand == len(tc.Commands) && !waitingForCommand {
-				sentAll = true
+			if nextCommand == len(tc.Commands) {
 				if outputMatches(tc, output.String()) {
-					return nil
+					armSettleTimer()
+				} else {
+					stopSettleTimer()
 				}
 			}
 		}
@@ -392,6 +443,12 @@ func outputMatches(tc Case, text string) bool {
 			return false
 		}
 		if expectation.Min > 0 && count < expectation.Min {
+			return false
+		}
+	}
+	for _, pattern := range tc.Reject {
+		matched, err := regexp.MatchString(pattern, text)
+		if err != nil || matched {
 			return false
 		}
 	}

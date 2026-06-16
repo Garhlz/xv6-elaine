@@ -8,7 +8,7 @@
 - 当前活动 lab 配置仍是 `conf/lab.mk` 中的 `LAB=net`，用于保留 net 相关编译宏和 QEMU 网络配置；其他 lab 功能在 `dev/all` 中无条件集成。
 - 构建产物已统一输出到 `build/`，课程 grader 脚本已统一移动到 `graders/`，日常入口以 `make build`、`make image`、`make test-smoke`、`make regression`、`make grade-*` 为主；`make smoke` / `make test-smoke-go` 目前保留为兼容别名，`make smoke-py` 保留旧 Python 对照入口。
 - 迁移历史与各 lab 取舍记录在 `docs/lab-migration-plan.md`；本文件只跟踪迁移完成后的后续工作。
-- 当前 Go smoke 已覆盖 util、syscall、pgtbl、traps、net、fs、mmap 的默认轻量 case，并默认避开外网 DNS；完整重型回归仍应在阶段性合并前单独运行。
+- 当前 Go smoke 已覆盖 util、syscall、pgtbl、traps、net、fs、mmap 的默认轻量 case，并默认避开外网 DNS；`make test-quick` 额外提供日常快速验证路径；完整重型回归仍应在阶段性合并前单独运行。
 
 ## 2. 已完成内容
 
@@ -97,8 +97,12 @@
   - 验证方式：`make test-smoke`，最近一次结果为 `suite smoke: 19 case(s), 0 failure(s)`。
 - [x] 稳定 QEMU 命令注入。
   - 涉及模块：`tests/host/internal/testrunner/runner.go`、`docs/test-migrate.md`。
-  - 完成内容：使用 xv6 shell prompt 回到结尾位置判定命令完成；失败日志保存到 `build/test-logs/<suite>/<case>.log`。
+  - 完成内容：使用 xv6 shell prompt 回到结尾位置判定非末尾命令完成；最后一条命令在匹配输出稳定后即可完成；失败日志保存到 `build/test-logs/<suite>/<case>.log`。
   - 验证方式：定向运行 `xargs`、`trace-children`、`mmaptest` 等多命令或长输出 case，并运行 `make test-smoke`。
+- [x] 修复网络 QEMU 入口的端口转发传递。
+  - 涉及模块：`Makefile`、`tests/host/internal/testrunner/runner.go`。
+  - 完成内容：`make qemu-net` / `make qemu-gdb-net` 显式递归传入 `NETFWD=1`，Go runner 的 net case 也直接传入 `NETFWD=1`，避免目标特定变量在被依赖 recipe 中失效。
+  - 验证方式：`make --no-print-directory -n qemu-net QEMUEXTRA+=-snapshot` 包含 `hostfwd=udp::$(FWDPORT)-:2000`；`nettests-local` 在允许 UDP host forwarding 的环境中通过。
 
 ## 3. 进行中 / 部分完成内容
 
@@ -177,6 +181,11 @@ t  - 验证方式：`make test-smoke` 含 40 case 不跑 heavy，`make test-heav
   - 剩余工作：仅对明确无状态污染的轻量 case 评估 per-suite QEMU 复用，避免文件系统状态污染和失败恢复复杂化。
   - 涉及模块：`tests/host/internal/testrunner/runner.go`、`docs/test-migrate.md`。
   - 验证方式：比较 per-case 与 per-suite 的耗时、日志质量和失败隔离效果。
+- [x] 增加日常快速验证路径。
+  - 当前状态：`make test-quick` 已提供 8 个低耗时 case，覆盖 util、syscall、pgtbl、cow、fs、mmap。
+  - 剩余工作：观察其日常耗时与稳定性，再决定是否为 quick 单独引入 QEMU 复用。
+  - 涉及模块：`Makefile`、`tests/host/internal/testrunner/suite.go`、`README.md`、`AGENTS.md`。
+  - 验证方式：`make test-quick` 稳定通过，且明显快于 `make test-smoke`。
 
 ## 4. 待完成内容
 
