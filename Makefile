@@ -42,6 +42,7 @@ KOBJS = \
   $(KBUILD)/file.o \
   $(KBUILD)/pipe.o \
   $(KBUILD)/exec.o \
+  $(KBUILD)/sysfd.o \
   $(KBUILD)/sysfile.o \
   $(KBUILD)/sysmmap.o \
   $(KBUILD)/sysnetcall.o \
