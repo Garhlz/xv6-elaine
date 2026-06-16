@@ -11,6 +11,7 @@ U = user
 BUILD = build
 KBUILD = $(BUILD)/kernel
 UBUILD = $(BUILD)/user
+PICO_BUILD = $(UBUILD)/pico
 MKFSBUILD = $(BUILD)/mkfs
 NOTXV6BUILD = $(BUILD)/notxv6
 
@@ -129,6 +130,9 @@ LDFLAGS = -z max-page-size=4096
 $(BUILD) $(KBUILD) $(UBUILD) $(MKFSBUILD) $(NOTXV6BUILD):
 	mkdir -p $@
 
+$(PICO_BUILD):
+	mkdir -p $@
+
 image: $(FSIMG)
 
 $(KERNEL): $(KOBJS) $(KOBJS_KCSAN) $(K)/kernel.ld $(KBUILD)/initcode | $(KBUILD)
@@ -165,6 +169,21 @@ XV6_ULIB = \
 	$(UBUILD)/printf.o \
 	$(UBUILD)/umalloc.o \
 	$(UBUILD)/statistics.o
+
+PICOLIBC_EXPERIMENT ?=
+PICOLIBC_PREFIX ?= $(CURDIR)/opt/picolibc-rv64-xv6
+PICOLIBC_INC = -isystem $(PICOLIBC_PREFIX)/include
+PICOLIBC_LIBDIR = $(PICOLIBC_PREFIX)/lib
+PICOLIBC_LIBS = -L$(PICOLIBC_LIBDIR) -lc
+LIBGCC = $(shell $(CC) -print-libgcc-file-name)
+
+PICO_OBJS = \
+	$(PICO_BUILD)/crt0_entry.o \
+	$(PICO_BUILD)/crt0.o \
+	$(PICO_BUILD)/usys_pico.o
+
+PICO_UPROGS = \
+	$(UBUILD)/_picohello
 
 UPROGS = \
 	$(UBUILD)/_cat \
@@ -208,6 +227,10 @@ UPROGS += \
 	$(UBUILD)/_lazytests
 endif
 
+ifdef PICOLIBC_EXPERIMENT
+UPROGS += $(PICO_UPROGS)
+endif
+
 build: $(KERNEL) $(UPROGS) $(MKFS) $(PH) $(BARRIER)
 
 $(UBUILD)/%.o: $(U)/%.c | $(UBUILD)
@@ -216,11 +239,36 @@ $(UBUILD)/%.o: $(U)/%.c | $(UBUILD)
 $(UBUILD)/%.o: $(U)/%.S | $(UBUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(UBUILD)/usys.S: $(U)/usys.pl | $(UBUILD)
-	perl $< > $@
+$(UBUILD)/usys.S: $(U)/usys.py | $(UBUILD)
+	python3 $< > $@
 
 $(UBUILD)/usys.o: $(UBUILD)/usys.S | $(UBUILD)
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+.PHONY: check-picolibc
+check-picolibc:
+	@test -d "$(PICOLIBC_PREFIX)/include" || (echo "missing picolibc include dir: $(PICOLIBC_PREFIX)/include"; exit 1)
+	@test -f "$(PICOLIBC_LIBDIR)/libc.a" || (echo "missing picolibc libc.a: $(PICOLIBC_LIBDIR)/libc.a"; exit 1)
+
+$(PICO_BUILD)/crt0_entry.o: $(U)/pico/crt0_entry.S | $(PICO_BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(PICO_BUILD)/crt0.o: $(U)/pico/crt0.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
+$(PICO_BUILD)/picohello.o: $(U)/pico/picohello.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
+$(PICO_BUILD)/usys_pico.S: $(U)/pico/usys_pico.py | $(PICO_BUILD)
+	python3 $< > $@
+
+$(PICO_BUILD)/usys_pico.o: $(PICO_BUILD)/usys_pico.S | $(PICO_BUILD)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(UBUILD)/_picohello: $(PICO_OBJS) $(PICO_BUILD)/picohello.o $(U)/pico/user_pico.ld | $(UBUILD)
+	$(CC) $(CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picohello.o $(PICOLIBC_LIBS) $(LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/picohello.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picohello.sym
 
 $(UBUILD)/_%: $(UBUILD)/%.o $(XV6_ULIB) | $(UBUILD)
 	$(LD) $(LDFLAGS) -N -e _start -Ttext 0 -o $@ $^

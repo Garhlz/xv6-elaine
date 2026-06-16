@@ -7,7 +7,7 @@ struct stat;
 struct sysinfo;
 
 // 系统调用声明。
-// 用户程序通过调用这些 C 函数发起系统调用；每个函数由 usys.pl 生成
+// 用户程序通过调用这些 C 函数发起系统调用；每个函数由 usys.py 生成
 // 一段汇编桩，将 SYS_* 编号装入 a7 后执行 ecall 指令。
 int fork(void);
 int exit(int) __attribute__((noreturn));

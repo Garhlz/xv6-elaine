@@ -95,25 +95,27 @@
 
 ```text
 user/pico/
+  crt0_entry.S
+  crt0.c
   picohello.c
-  usys_pico.pl
+  usys_pico.py
   xv6_syscall_raw.h
   picolibc_os.c
   user_pico.ld
 ```
 
-建议先**不要**新增 `user/pico/crt0_entry.S` / `user/pico/crt0.c`。
+建议第一阶段就新增 `user/pico/crt0_entry.S` / `user/pico/crt0.c`。
 
 原因：
 
-- 仓库已经有可工作的最小 `_start` / `crt0`
-- 第一阶段无需维护两套几乎相同的启动代码
-- 等到需要引入 `__libc_init_array` / `__libc_fini_array` 时，再考虑为 `picolibc` 分叉专用 startup
+- `picolibc` startup 后续会接入 `__libc_init_array` / `__libc_fini_array`
+- native `crt0` 继续只服务 `XV6_ULIB`
+- 两条链路从一开始隔离，避免调试链接错误时混入 native 头文件和符号
 
 第一阶段边界：
 
 - native xv6 用户程序：
-  - 继续使用当前 `ULIB`
+  - 继续使用当前 `XV6_ULIB`
 - `picolibc` 实验程序：
   - 使用单独 `PICO_OBJS + libc.a + libgcc.a`
 
@@ -174,17 +176,16 @@ PICO_BUILD = $(UBUILD)/pico
 
 ```make
 PICO_OBJS = \
-  $(UBUILD)/crt0_entry.o \
-  $(UBUILD)/crt0.o \
-  $(PICO_BUILD)/usys_pico.o \
-  $(PICO_BUILD)/picolibc_os.o
+  $(PICO_BUILD)/crt0_entry.o \
+  $(PICO_BUILD)/crt0.o \
+  $(PICO_BUILD)/usys_pico.o
 ```
 
 关键点：
 
-- 先复用现有 `crt0_entry.o` / `crt0.o`
 - 不链接 native `ulib.o` / `printf.o` / `umalloc.o`
 - 只在 `PICOLIBC_EXPERIMENT=1` 时构建 `_picohello`
+- 第一阶段只建立独立 build/link scaffold；第二阶段加入 raw syscall，OS glue 放到后续阶段
 
 ### 7.2 为什么不能混链当前 ULIB
 
@@ -205,7 +206,7 @@ PICO_OBJS = \
 
 ### 8.1 动机
 
-当前 `user/usys.pl` 生成的是 libc 友好的名字：
+当前 `user/usys.py` 生成的是 libc 友好的名字：
 
 - `read`
 - `write`
@@ -229,14 +230,14 @@ PICO_OBJS = \
 新增：
 
 ```text
-user/pico/usys_pico.pl
+user/pico/usys_pico.py
 user/pico/xv6_syscall_raw.h
 ```
 
 其中：
 
-- `usys_pico.pl`
-  - 参考现有 `user/usys.pl`
+- `usys_pico.py`
+  - 参考现有 `user/usys.py`
   - 但生成 `__xv6_*` 符号
 - `xv6_syscall_raw.h`
   - 只声明 `__xv6_*` raw syscall
@@ -616,7 +617,7 @@ int main(int argc, char **argv) {
 
 内容：
 
-- 新增 `usys_pico.pl`
+- 新增 `usys_pico.py`
 - 新增 `xv6_syscall_raw.h`
 - 生成 `__xv6_*` raw syscall
 
