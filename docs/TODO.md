@@ -9,7 +9,7 @@
 - 构建产物已统一输出到 `build/`，课程 grader 脚本已统一移动到 `graders/`，日常入口以 `make build`、`make image`、`make test-quick`、`make test-smoke`、`make test-<lab>`、`make test-heavy`、`make test-all` 为主；`make smoke` / `make smoke-py` 保留为 legacy 对照。
 - Go runner 已完成 Phase 0~4 迁移（smoke 40 case、per-subsystem 9 suite、HostOnly 模式、heavy 排除、quick runner）。
 - 用户态已引入最小 `crt0` 运行时、ulibc 模块化拆分（`ustring.c` / `ufile.c` / `ugetpid.c`）、`usys.py` 替代 `usys.pl`。
-- `picolibc` PoC 实验链路已搭建（`user/pico/`），通过 `PICOLIBC_EXPERIMENT=1` 门控；阶段 0/1/2 完成（crt0 硬化、scaffold、raw `__xv6_*` syscall）；阶段 3（OS glue `picolibc_os.c`）是实现 `printf`/`malloc`/`exit` 真正跑通的前置条件，尚未落地。
+- `picolibc` PoC 实验链路已搭建（`user/pico/`），通过 `PICOLIBC_EXPERIMENT=1` 门控；阶段 0/1/2/3/4/5/6 已完成，`picohello` 已验证 `printf`/`malloc`/`exit`，`picoio` 和 `picostdio` 已验证基础文件 I/O。
 - 迁移历史与各 lab 取舍记录在 `docs/lab-migration-plan.md`；本文件只跟踪迁移完成后的后续工作。
 
 ## 2. 已完成内容
@@ -124,11 +124,10 @@
   - 涉及模块：`user/ustring.c`、`user/ufile.c`、`user/ugetpid.c`、`user/ulib.h`、`user/usyscall.h`、`user/usys.py`、`user/user.h`、`Makefile`。
   - 完成内容：将原 `user/ulib.c` 按职责拆为字符串/内存（`ustring.c`）、文件 API（`ufile.c`）、快速 pid（`ugetpid.c`）；`usys.pl` 替换为 `usys.py`；头文件拆为 `ulib.h`（libc 声明）+ `usyscall.h`（syscall 声明）+ `user.h`（兼容聚合）。
   - 验证方式：`make build`、`make test-quick`、`make test-smoke`。
-- [x] 建立 `picolibc` PoC 实验链路（阶段 0/1/2 完成）。
-  - 涉及模块：`user/pico/`（`crt0_entry.S`、`crt0.c`、`usys_pico.py`、`xv6_syscall_raw.h`、`user_pico.ld`、`picohello.c`）、`Makefile`、`docs/picolibc.md`。
-  - 完成内容：搭建独立 picolibc 链路并通过 `PICOLIBC_EXPERIMENT=1` 门控；crt0 硬化（noreturn + fallback loop）；`__xv6_*` raw syscall stub 生成；picohello 链接规则和 linker script 就绪。
-  - 剩余：阶段 3（OS glue `picolibc_os.c`）是实现 `printf`/`malloc`/`exit` 真正跑通的前置条件。
-  - 验证方式：`make build PICOLIBC_EXPERIMENT=1` 通过，链接产物可被 `readelf` 校验。
+- [x] 建立 `picolibc` PoC 实验链路并跑通基础 I/O。
+  - 涉及模块：`user/pico/`（`crt0_entry.S`、`crt0.c`、`usys_pico.py`、`xv6_syscall_raw.h`、`picolibc_os.c`、`user_pico.ld`、`picohello.c`、`picoio.c`、`picostdio.c`）、`Makefile`、`docs/picolibc.md`。
+  - 完成内容：搭建独立 picolibc 链路并通过 `PICOLIBC_EXPERIMENT=1` 门控；crt0 硬化（noreturn + fallback loop）；`__xv6_*` raw syscall stub 生成；P0/P1 OS glue 接入；`picohello`、`picoio`、`picostdio` 链接规则就绪。
+  - 验证方式：`make PICOLIBC_EXPERIMENT=1 build`、`make test-quick`；xv6 shell 中验证 `picohello`、`picoio README`、`picostdio README`。
 - [x] exec/ELF 流程注释中文化与可读性重构。
   - 涉及模块：`kernel/exec.c`、`kernel/elf.h`。
   - 完成内容：`exec.c` 注释全中文化，提取 `open_exec`/`load_elf`/`setup_user_stack`/`save_proc_name`/`commit_exec` 五个 helper，6 步流程标注，变量重命名（`sz1`→`new_sz` 等）；`elf.h` ELF 结构体字段注释中文化；`ulib.c`/`printf.c`/`umalloc.c` 注释中文化 + 变量可读性优化。
@@ -252,9 +251,9 @@
 - [x] 规范化当前 ulibc / 用户态支持层。
   - 当前状态：已完成 `crt0` 启动路径、ulibc 模块化拆分（`ustring.c`/`ufile.c`/`ugetpid.c`）、`usys.py` 替换 `usys.pl`、头文件拆为 `ulib.h`+`usyscall.h`+`user.h`。
   - 验证方式：`make build`、`make test-quick`、`make test-smoke`。
-- [ ] 补齐 picolibc OS glue 并跑通 picohello（替代原 newlib 计划）。
-  - 当前状态：`user/pico/` 目录已建立独立 picolibc 链路，通过 `PICOLIBC_EXPERIMENT=1` 门控；阶段 0/1/2 完成；阶段 3（OS glue `picolibc_os.c`）是实现 `printf`/`malloc`/`exit` 真正跑通的前置条件，尚未落地。详见 `docs/picolibc.md`。
-  - 剩余工作：实现 `__xv6_*` → POSIX glue（`_exit`/`write`/`read`/`sbrk`/`fstat`/`lseek`/`isatty`），然后逐步扩展 picolibc 覆盖范围。
+- [x] 补齐 picolibc P0/P1 OS glue 并跑通基础 PoC（替代原 newlib 计划）。
+  - 当前状态：`user/pico/` 目录已建立独立 picolibc 链路，通过 `PICOLIBC_EXPERIMENT=1` 门控；`picohello` 已验证 `printf`/`malloc`/`exit`；`picoio` 已验证 POSIX fd API；`picostdio` 已验证基础 stdio 文件 I/O。详见 `docs/picolibc.md`。
+  - 后续工作：补 `time`、随机数、完整 errno 语义、init/fini constructor 路径，再开始迁移 `echo` / `sleep` / `cat` 这类简单 native 程序。
 - [ ] 重构 VMA 管理模块。
   - 要做什么：将 VMA 查找、分配、拆分、写回、清理逻辑从 `kernel/proc.c` 中拆出，形成更清晰的模块边界。
   - 涉及模块：`kernel/proc.c`、`kernel/proc.h`、可能新增 `kernel/mmap.c` 或 `kernel/vma.c`、`Makefile`。

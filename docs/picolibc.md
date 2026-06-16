@@ -1,6 +1,6 @@
 # Picolibc 接入记录
 
-本文档跟踪 `dev/all` 分支接入 `picolibc` 的进度和计划。与 `lab-migration-plan.md`（历史记录）和 `TODO.md`（工程路线）不同的是，本文件聚焦一条具体技术链路的分阶段落地。当前已完成阶段 0/1/2/3/4/5/6：仓库侧准备已完成，`picohello` 已在 xv6 shell 中验证 `printf`、`argc/argv`、`malloc/free` 和 `exit` 路径。
+本文档跟踪 `dev/all` 分支接入 `picolibc` 的进度和计划。与 `lab-migration-plan.md`（历史记录）和 `TODO.md`（工程路线）不同的是，本文件聚焦一条具体技术链路的分阶段落地。当前已完成阶段 0/1/2/3/4/5/6，并推进了阶段 8 的第一步：`picohello` 已在 xv6 shell 中验证 `printf`、`argc/argv`、`malloc/free` 和 `exit` 路径；`picoio` 已验证 `open/stat/read/write/close/getpid` 路径；`picostdio` 已验证 `fopen/fread/fwrite/fclose` 路径。
 
 ## 1. 当前基线
 
@@ -15,6 +15,8 @@
 - `user/pico/` 独立实验目录 — 已创建
 - 最小 OS glue、linker script、picolibc cross file 和 Makefile 构建目标 — 已就绪
 - `picohello` 链接规则已接入，最小运行验证已通过
+- `picoio` 链接规则已接入，P1 文件 I/O 验证已通过
+- `picostdio` 链接规则已接入，stdio 文件 I/O 验证已通过
 
 ### 1.2 当前 xv6 用户态 ABI
 
@@ -36,8 +38,8 @@
 ### 2.1 第一阶段目标
 
 - 在不影响现有 xv6 用户程序的前提下，引入一条 `picolibc` PoC 链路
-- `build/user/_picohello` 可被打包进 `fs.img` 并在 xv6 shell 中运行
-- 先跑通 `printf`、`malloc/free`、`main(argc, argv)` 返回后正常 `exit`
+- `build/user/_picohello`、`build/user/_picoio`、`build/user/_picostdio` 可被打包进 `fs.img` 并在 xv6 shell 中运行
+- 先跑通 `printf`、`malloc/free`、`main(argc, argv)` 返回后正常 `exit`，再验证基础 POSIX fd I/O 和 stdio 文件 I/O
 - 保持现有 native 用户程序不变（`cat`、`sh`、`usertests`、`nettests`、`mmaptest`、`make test-quick` 等）
 
 ### 2.2 核心约束
@@ -53,16 +55,16 @@
 
 - 第一阶段不迁移 `sh` / `init` / `usertests`
 - 第一阶段不修改 native `user/user.h` 作为 `picolibc` 公共头
-- 第一阶段不追求 `fopen/fread/fwrite` 全量可用
+- 第一阶段只验证 `fopen/fread/fwrite/fclose` 的基础文件读取链路，不追求完整 stdio 语义
 - 第一阶段不引入完整 Unix 初始栈布局
 - 第一阶段不处理 `envp` / `auxv`
 
 ### 2.4 整体路线
 
-先不替换系统 libc，先做独立的 `picolibc _picohello` 链路；用 `__xv6_*` raw syscall 隔离符号；用最小 OS glue 跑通 `printf/malloc/exit`；确认稳定后，再迁移简单用户程序。
+先不替换系统 libc，先做独立的 `picolibc` 实验链路；用 `__xv6_*` raw syscall 隔离符号；用最小 OS glue 跑通 `printf/malloc/exit`；再扩展到基础 fd I/O 和 stdio 文件 I/O；确认稳定后，再迁移简单用户程序。
 
 ```text
-crt0 硬化 → scaffold → raw syscall → OS glue → linker script → 构建 picolibc → picohello → 扩展程序 → init/fini
+crt0 硬化 → scaffold → raw syscall → OS glue → linker script → 构建 picolibc → picohello → picoio/picostdio → 迁移简单程序 → init/fini
 ```
 
 ## 3. 目录与边界设计
@@ -76,6 +78,8 @@ user/pico/
   xv6_syscall_raw.h     # __xv6_* raw syscall 声明
   picolibc_os.c         # 最小 OS glue（_write/_read/_sbrk/_exit 等）
   user_pico.ld          # picolibc 专用 linker script
+  picoio.c              # 文件 I/O PoC 测试程序
+  picostdio.c           # stdio 文件 I/O PoC 测试程序
 ```
 
 边界隔离：
@@ -106,14 +110,15 @@ PICO_BUILD = $(UBUILD)/pico
 PICO_OBJS = \
   $(PICO_BUILD)/crt0_entry.o \
   $(PICO_BUILD)/crt0.o \
-  $(PICO_BUILD)/usys_pico.o
+  $(PICO_BUILD)/usys_pico.o \
+  $(PICO_BUILD)/picolibc_os.o
 ```
 
 关键点：
 
 - 不链接 native `ulib.o` / `printf.o` / `umalloc.o`
-- 只在 `PICOLIBC_EXPERIMENT=1` 时构建 `_picohello`
-- 第一阶段只建立 build/link scaffold
+- 只在 `PICOLIBC_EXPERIMENT=1` 时构建 `_picohello`、`_picoio`、`_picostdio`
+- native `UPROGS` 与实验 `PICO_UPROGS` 保持分离
 
 ### 5.2 为什么不能混链
 
@@ -145,7 +150,7 @@ native `user/usys.py` 生成的符号名（`read`、`write`、`close` 等）是 
 
 P0（最小集合）：`__xv6_exit`、`__xv6_read`、`__xv6_write`、`__xv6_close`、`__xv6_fstat`、`__xv6_sbrk`
 
-P1（按需补充）：`__xv6_open`、`__xv6_unlink`、`__xv6_getpid`、`__xv6_kill`
+P1（已补充）：`__xv6_open`、`__xv6_unlink`、`__xv6_getpid`、`__xv6_kill`
 
 - 涉及模块：`user/pico/usys_pico.py`、`user/pico/xv6_syscall_raw.h`。
 - 验证方式：`nm build/user/pico/usys_pico.o | grep __xv6` 确认 `__xv6_*` 符号均生成。
@@ -174,6 +179,7 @@ P1（按需补充）：`__xv6_open`、`__xv6_unlink`、`__xv6_getpid`、`__xv6_k
 - `isatty(fd)` — 对 `0/1/2` 返回 true
 - `fstat(fd, buf)` — 第一阶段满足 stdio 最小需要，至少不崩
 - `_write/_read/_close/_fstat/_lseek/_sbrk` — 转发到对应非下划线接口，兼容常见 libc backend 符号
+- `open/stat/unlink/getpid/kill` — P1 OS glue，用于验证文件 I/O 和基础进程接口
 
 目标：跑通 `printf`、`malloc/free`、`exit`。
 
@@ -365,10 +371,46 @@ riscv64-unknown-elf-objdump -d build/user/_picohello
 
 ### 12.1 第二阶段：扩展 OS glue
 
-补 P1 接口：`open`、`stat`、`unlink`、`getpid`、`kill`。
+P1 接口已补：`open`、`stat`、`unlink`、`getpid`、`kill`。
 
-- 目标：支撑简单文件 I/O（`fopen` / `fread` / `fclose`）
-- 验证方式：编译通过，新增接口无 undefined symbol
+- 目标：支撑简单文件 I/O（POSIX fd API 与 `fopen` / `fread` / `fwrite` / `fclose`）
+- 已验证：`picoio README` 可通过 `open/stat/read/write/close/getpid` 读取并输出 README 前 64 字节
+- 已验证：`picostdio README` 可通过 `fopen/fread/fwrite/fclose` 读取并输出 README 前 64 字节
+- 下一步：新增更小的 `picoecho` / `picosleep`，或开始迁移简单 native 程序
+
+### 12.1.1 已验证输出
+
+使用脚本化 QEMU 等待 shell prompt 后执行：
+
+```sh
+picoio README
+echo done
+```
+
+关键输出：
+
+```text
+picoio pid = 3
+stat README size = 2226
+read 64 bytes from README
+xv6 is a re-implementation of Dennis Ritchie's and Ken Thompson'
+done
+```
+
+使用脚本化 QEMU 等待 shell prompt 后执行：
+
+```sh
+picostdio README
+echo done
+```
+
+关键输出：
+
+```text
+fread 64 bytes from README
+xv6 is a re-implementation of Dennis Ritchie's and Ken Thompson'
+done
+```
 
 ### 12.2 第三阶段：init/fini
 
@@ -383,23 +425,31 @@ riscv64-unknown-elf-objdump -d build/user/_picohello
 
 暂不优先：`init`、`sh`、`usertests`、`nettests`、`mmaptest`（系统启动关键路径或覆盖面太广，不适合做 libc PoC 首批迁移）。
 
-## 13. 提交建议
+## 13. 当前提交边界
 
-- **Commit 1**: `refactor(user): harden crt0 entry` — `_start` fallback loop + `crt0_main` noreturn
-- **Commit 2**: `build(user): add picolibc experiment scaffolding` — 新增 `user/pico/`、`picohello.c`、`user_pico.ld`、Makefile 门控
-- **Commit 3**: `user: add raw syscall stubs for libc integration` — 新增 `usys_pico.py`、`xv6_syscall_raw.h`，生成 `__xv6_*`
-- **Commit 4**: `libc: add picolibc OS glue for xv6` — 新增 `picolibc_os.c`，跑通 P0 OS glue 接口
-- **Commit 5**: `build(user): link picohello with picolibc` — Makefile 接入外部 picolibc 产物，`_picohello` 成功链接
-- **Commit 6**: `docs: record picolibc integration status` — 记录当前可用接口、已知限制、最小验证方式
+已提交部分：
+
+- `build(user): add picolibc experiment scaffold` — 建立 `user/pico/`、native `usys.py`、实验构建门控
+- `libc: wire picolibc hello path` — 接入 P0 OS glue、linker script、cross file，并验证 `_picohello`
+
+当前待提交部分：
+
+- 扩展 P1 raw syscall：`open`、`unlink`、`getpid`、`kill`
+- 扩展 P1 OS glue：`open`、`stat`、`unlink`、`getpid`、`kill`
+- 新增 `_picoio` 验证 POSIX fd API
+- 新增 `_picostdio` 验证基础 stdio 文件 I/O
+- 同步本文档中的阶段 8 状态和验证输出
 
 ## 14. 第一阶段完成标准
 
 全部满足以下条件视为第一阶段完成：
 
 1. 默认 native 用户程序和测试入口不受影响
-2. `make PICOLIBC_EXPERIMENT=1 build` 能生成 `_picohello`
+2. `make PICOLIBC_EXPERIMENT=1 build` 能生成 `_picohello`、`_picoio`、`_picostdio`
 3. `_picohello` 的 `readelf` / `nm` 检查通过
-4. `_picohello` 可在 xv6 shell 中运行
+4. `_picohello`、`_picoio`、`_picostdio` 可在 xv6 shell 中运行
 5. `printf` 正常输出
 6. `malloc/free` 正常工作
 7. `main` 返回后能正确 `exit`
+8. `picoio README` 可通过 POSIX fd API 读取并输出文件内容
+9. `picostdio README` 可通过 stdio API 读取并输出文件内容
