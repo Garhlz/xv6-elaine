@@ -126,7 +126,7 @@ struct proc {
     struct file *ofile[NOFILE];              // 打开的文件
     struct inode *cwd;                       // 当前工作目录
     char name[16];                           // 进程名（调试用）
-    int tracemask;                           // 系统调用跟踪掩码
+    uint64 tracemask;                        // 系统调用跟踪掩码
     struct usyscall *usyscall_page;          // 快速获取 pid 的 USYSCALL 页
     int alarm_interval;                      // 定时器间隔（tick 数）
     uint64 alarm_handler;                    // 用户态信号处理函数地址

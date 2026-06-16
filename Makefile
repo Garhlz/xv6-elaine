@@ -31,7 +31,9 @@ KOBJS = \
   $(KBUILD)/swtch.o \
   $(KBUILD)/trampoline.o \
   $(KBUILD)/trap.o \
+  $(KBUILD)/sysarg.o \
   $(KBUILD)/syscall.o \
+  $(KBUILD)/syscall_table.o \
   $(KBUILD)/sysproc.o \
   $(KBUILD)/bio.o \
   $(KBUILD)/fs.o \

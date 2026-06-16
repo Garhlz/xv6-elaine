@@ -615,7 +615,7 @@ uint64 sys_pipe(void) {
 }
 
 // connect(raddr, lport, rport): 创建 UDP socket（net lab）。
-int sys_connect(void) {
+uint64 sys_connect(void) {
     struct file *file;
     uint32 raddr, lport, rport;
 

@@ -1,5 +1,8 @@
 //
-// network system calls.
+// 网络系统调用（network system calls）。
+// 实现 UDP socket 的创建、读取、写入、关闭，以及从 net.c 接收数据包的回调。
+// 所有 socket 以全局单向链表 sockets 管理，rxq 用于缓冲未读取的 mbuf，
+// 读取者通过 sleep/wakeup 在空队列上等待。
 //
 
 #include "types.h"
@@ -14,13 +17,15 @@
 #include "file.h"
 #include "net.h"
 
+// UDP socket 结构。
+// 每个 socket 由 (远程IP, 本地端口, 远程端口) 三元组唯一标识。
 struct sock {
-    struct sock *next;    // the next socket in the list
-    uint32 raddr;         // the remote IPv4 address
-    uint16 lport;         // the local UDP port number
-    uint16 rport;         // the remote UDP port number
-    struct spinlock lock; // protects the rxq
-    struct mbufq rxq;     // a queue of packets waiting to be received
+    struct sock *next;    // 链表中下一个 socket
+    uint32 raddr;         // 远程 IPv4 地址
+    uint16 lport;         // 本地 UDP 端口号
+    uint16 rport;         // 远程 UDP 端口号
+    struct spinlock lock; // 保护 rxq 的锁
+    struct mbufq rxq;     // 等待被读取的已接收数据包队列（mbuf 链表）
 };
 
 static struct spinlock lock;
@@ -40,7 +45,7 @@ int sockalloc(struct file **f, uint32 raddr, uint16 lport, uint16 rport) {
     if ((si = (struct sock *)kalloc()) == 0)
         goto bad;
 
-    // initialize objects
+    // 初始化 socket 各字段
     si->raddr = raddr;
     si->lport = lport;
     si->rport = rport;
@@ -51,7 +56,7 @@ int sockalloc(struct file **f, uint32 raddr, uint16 lport, uint16 rport) {
     (*f)->writable = 1;
     (*f)->sock = si;
 
-    // add to list of sockets
+    // 查重：三元组不能重复；通过后添加到 socket 链表头部
     acquire(&lock);
     pos = sockets;
     while (pos) {
@@ -80,7 +85,7 @@ void sockclose(struct sock *si) {
     struct sock **pos;
     struct mbuf *m;
 
-    // remove from list of sockets
+    // 从 socket 链表中摘除
     acquire(&lock);
     pos = &sockets;
     while (*pos) {
@@ -92,7 +97,7 @@ void sockclose(struct sock *si) {
     }
     release(&lock);
 
-    // free any pending mbufs
+    // 释放 rxq 中所有未读取的 mbuf
     while (!mbufq_empty(&si->rxq)) {
         m = mbufq_pophead(&si->rxq);
         mbuffree(m);
@@ -145,13 +150,10 @@ int sockwrite(struct sock *si, uint64 addr, int n) {
     return n;
 }
 
-// called by protocol handler layer to deliver UDP packets
+// 网卡协议层收包回调：根据三元组查找对应的 socket，
+// 将 mbuf 添加到 socket 的接收队列 rxq，并唤醒等待的读取者。
+// 如果没有找到匹配的 socket，直接释放 mbuf（丢包）。
 void sockrecvudp(struct mbuf *m, uint32 raddr, uint16 lport, uint16 rport) {
-    //
-    // Find the socket that handles this mbuf and deliver it, waking
-    // any sleeping reader. Free the mbuf if there are no sockets
-    // registered to handle it.
-    //
     struct sock *si;
 
     acquire(&lock);
