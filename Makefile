@@ -171,16 +171,21 @@ XV6_ULIB = \
 	$(UBUILD)/statistics.o
 
 PICOLIBC_EXPERIMENT ?=
+PICOLIBC_SRC ?= $(CURDIR)/external/picolibc
 PICOLIBC_PREFIX ?= $(CURDIR)/opt/picolibc-rv64-xv6
+PICOLIBC_BUILD ?= $(BUILD)/picolibc-rv64
 PICOLIBC_INC = -isystem $(PICOLIBC_PREFIX)/include
 PICOLIBC_LIBDIR = $(PICOLIBC_PREFIX)/lib
 PICOLIBC_LIBS = -L$(PICOLIBC_LIBDIR) -lc
 LIBGCC = $(shell $(CC) -print-libgcc-file-name)
+PICO_CFLAGS = $(CFLAGS) -march=rv64gc -mabi=lp64
+PICO_LIBGCC = $(shell $(CC) -march=rv64gc -mabi=lp64 -print-libgcc-file-name)
 
 PICO_OBJS = \
 	$(PICO_BUILD)/crt0_entry.o \
 	$(PICO_BUILD)/crt0.o \
-	$(PICO_BUILD)/usys_pico.o
+	$(PICO_BUILD)/usys_pico.o \
+	$(PICO_BUILD)/picolibc_os.o
 
 PICO_UPROGS = \
 	$(UBUILD)/_picohello
@@ -250,23 +255,63 @@ check-picolibc:
 	@test -d "$(PICOLIBC_PREFIX)/include" || (echo "missing picolibc include dir: $(PICOLIBC_PREFIX)/include"; exit 1)
 	@test -f "$(PICOLIBC_LIBDIR)/libc.a" || (echo "missing picolibc libc.a: $(PICOLIBC_LIBDIR)/libc.a"; exit 1)
 
+.PHONY: picolibc-configure picolibc-build picolibc-install
+picolibc-configure:
+	@test -d "$(PICOLIBC_SRC)" || (echo "missing picolibc source dir: $(PICOLIBC_SRC)"; exit 1)
+	@if [ -f "$(PICOLIBC_BUILD)/build.ninja" ]; then \
+		meson setup --reconfigure $(PICOLIBC_BUILD) $(PICOLIBC_SRC) \
+			--cross-file toolchain/cross-riscv64-xv6.txt \
+			--prefix "$(PICOLIBC_PREFIX)" \
+			-Dpicocrt=false \
+			-Dmultilib=false \
+			-Dtests=false \
+			-Dsingle-thread=true \
+			-Dthread-local-storage=false \
+			-Dnewlib-global-errno=true \
+			-Dposix-console=true \
+			-Denable-malloc=true \
+			-Dspecsdir=none; \
+	else \
+		meson setup $(PICOLIBC_BUILD) $(PICOLIBC_SRC) \
+			--cross-file toolchain/cross-riscv64-xv6.txt \
+			--prefix "$(PICOLIBC_PREFIX)" \
+			-Dpicocrt=false \
+			-Dmultilib=false \
+			-Dtests=false \
+			-Dsingle-thread=true \
+			-Dthread-local-storage=false \
+			-Dnewlib-global-errno=true \
+			-Dposix-console=true \
+			-Denable-malloc=true \
+			-Dspecsdir=none; \
+	fi
+
+picolibc-build: picolibc-configure
+	meson compile -C $(PICOLIBC_BUILD)
+
+picolibc-install: picolibc-build
+	meson install -C $(PICOLIBC_BUILD)
+
 $(PICO_BUILD)/crt0_entry.o: $(U)/pico/crt0_entry.S | $(PICO_BUILD)
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(PICO_CFLAGS) -c -o $@ $<
 
 $(PICO_BUILD)/crt0.o: $(U)/pico/crt0.c | $(PICO_BUILD) check-picolibc
-	$(CC) $(CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
 
 $(PICO_BUILD)/picohello.o: $(U)/pico/picohello.c | $(PICO_BUILD) check-picolibc
-	$(CC) $(CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
+$(PICO_BUILD)/picolibc_os.o: $(U)/pico/picolibc_os.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
 
 $(PICO_BUILD)/usys_pico.S: $(U)/pico/usys_pico.py | $(PICO_BUILD)
 	python3 $< > $@
 
 $(PICO_BUILD)/usys_pico.o: $(PICO_BUILD)/usys_pico.S | $(PICO_BUILD)
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(PICO_CFLAGS) -c -o $@ $<
 
 $(UBUILD)/_picohello: $(PICO_OBJS) $(PICO_BUILD)/picohello.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
-	$(CC) $(CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picohello.o $(PICOLIBC_LIBS) $(LIBGCC)
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picohello.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
 	$(OBJDUMP) -S $@ > $(UBUILD)/picohello.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picohello.sym
 

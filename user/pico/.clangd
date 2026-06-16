@@ -1,0 +1,6 @@
+CompileFlags:
+  Add:
+    - -isystem
+    - opt/picolibc-rv64-xv6/include
+    - -march=rv64gc
+    - -mabi=lp64

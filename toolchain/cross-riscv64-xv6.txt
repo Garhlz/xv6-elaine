@@ -1,0 +1,19 @@
+[binaries]
+c = 'riscv64-unknown-elf-gcc'
+ar = 'riscv64-unknown-elf-ar'
+as = 'riscv64-unknown-elf-as'
+ld = 'riscv64-unknown-elf-ld'
+strip = 'riscv64-unknown-elf-strip'
+
+[host_machine]
+system = 'unknown'
+cpu_family = 'riscv64'
+cpu = 'riscv64'
+endian = 'little'
+
+[built-in options]
+c_args = ['-nostdlib', '-ffreestanding', '-fno-common', '-mcmodel=medany', '-mno-relax', '-march=rv64gc', '-mabi=lp64']
+
+[properties]
+needs_exe_wrapper = true
+skip_sanity_check = true

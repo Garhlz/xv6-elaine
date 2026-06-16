@@ -1,6 +1,6 @@
 # Picolibc 接入记录
 
-本文档跟踪 `dev/all` 分支接入 `picolibc` 的进度和计划。与 `lab-migration-plan.md`（历史记录）和 `TODO.md`（工程路线）不同的是，本文件聚焦一条具体技术链路的分阶段落地。当前已完成阶段 0/1/2（crt0 硬化、scaffold、raw syscall），阶段 3/4/5 待推进，阶段 6（picohello）依赖阶段 3 和阶段 5 完成后才能按 xv6 syscall 路径稳定运行。
+本文档跟踪 `dev/all` 分支接入 `picolibc` 的进度和计划。与 `lab-migration-plan.md`（历史记录）和 `TODO.md`（工程路线）不同的是，本文件聚焦一条具体技术链路的分阶段落地。当前已完成阶段 0/1/2/3/4/5/6：仓库侧准备已完成，`picohello` 已在 xv6 shell 中验证 `printf`、`argc/argv`、`malloc/free` 和 `exit` 路径。
 
 ## 1. 当前基线
 
@@ -13,7 +13,8 @@
 - `usys.py` 替代 `usys.pl` — 已完成
 - `PICOLIBC_EXPERIMENT=1` 构建门控 — 已就绪
 - `user/pico/` 独立实验目录 — 已创建
-- `picohello` 链接规则和 linker script 已就绪，依赖阶段 3（OS glue）和阶段 5（构建 picolibc）完成后验证
+- 最小 OS glue、linker script、picolibc cross file 和 Makefile 构建目标 — 已就绪
+- `picohello` 链接规则已接入，最小运行验证已通过
 
 ### 1.2 当前 xv6 用户态 ABI
 
@@ -149,7 +150,7 @@ P1（按需补充）：`__xv6_open`、`__xv6_unlink`、`__xv6_getpid`、`__xv6_k
 - 涉及模块：`user/pico/usys_pico.py`、`user/pico/xv6_syscall_raw.h`。
 - 验证方式：`nm build/user/pico/usys_pico.o | grep __xv6` 确认 `__xv6_*` 符号均生成。
 
-## 7. 阶段 3：最小 OS glue
+## 7. 阶段 3：最小 OS glue（已完成）
 
 依赖：阶段 2。与阶段 4（linker script）和阶段 5（构建 picolibc）可并行推进。
 
@@ -172,6 +173,7 @@ P1（按需补充）：`__xv6_open`、`__xv6_unlink`、`__xv6_getpid`、`__xv6_k
 - `lseek(fd, offset, whence)` — xv6 无真正 seek，先返回 `ESPIPE`
 - `isatty(fd)` — 对 `0/1/2` 返回 true
 - `fstat(fd, buf)` — 第一阶段满足 stdio 最小需要，至少不崩
+- `_write/_read/_close/_fstat/_lseek/_sbrk` — 转发到对应非下划线接口，兼容常见 libc backend 符号
 
 目标：跑通 `printf`、`malloc/free`、`exit`。
 
@@ -182,9 +184,9 @@ P1（按需补充）：`__xv6_open`、`__xv6_unlink`、`__xv6_getpid`、`__xv6_k
 策略：在 `picolibc_os.c` 中维护私有 `struct xv6_stat`，由 xv6 ABI 结构手动转换到 libc `struct stat`。第一阶段如只需支撑 `printf`，可先做最小填充。
 
 - 涉及模块：`user/pico/picolibc_os.c`、`user/pico/xv6_syscall_raw.h`。
-- 验证方式：编译通过，链接 `_picohello` 时无 `_write` / `_read` / `_sbrk` / `_exit` undefined symbol。
+- 验证方式：安装 `picolibc` 后，链接 `_picohello` 时无 `_write` / `_read` / `_sbrk` / `_exit` undefined symbol。
 
-## 8. 阶段 4：Picolibc 专用 linker script
+## 8. 阶段 4：Picolibc 专用 linker script（已完成）
 
 依赖：阶段 1。与阶段 3（OS glue）和阶段 5（构建 picolibc）可并行推进。
 
@@ -194,6 +196,7 @@ P1（按需补充）：`__xv6_open`、`__xv6_unlink`、`__xv6_getpid`、`__xv6_k
 
 - `ENTRY(_start)`
 - 明确 `.text` / `.rodata` / `.data` / `.bss`
+- 预留 `.preinit_array` / `.init_array` / `.fini_array` 和对应 start/end 符号
 - 导出 `end`
 - 产出静态 ELF
 - 保持当前 xv6 `exec()` 可接受的 LOAD segment 布局
@@ -208,7 +211,7 @@ P1（按需补充）：`__xv6_open`、`__xv6_unlink`、`__xv6_getpid`、`__xv6_k
 
 如果 ELF 被 `exec()` 拒绝，优先调整 linker script / 链接参数，不首先修改 `kernel/exec.c`。
 
-## 9. 阶段 5：构建外部 picolibc
+## 9. 阶段 5：构建外部 picolibc（仓库侧已完成）
 
 依赖：宿主机 riscv64 工具链 + meson/ninja。与阶段 3（OS glue）和阶段 4（linker script）可并行推进。
 
@@ -226,6 +229,7 @@ P1（按需补充）：`__xv6_open`、`__xv6_unlink`、`__xv6_getpid`、`__xv6_k
 - `single-thread=true` — xv6 用户态单线程
 - `thread-local-storage=false` — 先避免 TLS 问题
 - `newlib-global-errno=true` — 先用单一全局 `errno`
+- `posix-console=true` — 编入 `stdin/stdout/stderr`，让 `printf` 可通过 `write` 路径输出
 - `enable-malloc=true` — 让 picolibc malloc 通过 `sbrk` 工作
 
 ### 9.3 Cross file
@@ -239,7 +243,17 @@ P1（按需补充）：`__xv6_open`、`__xv6_unlink`、`__xv6_getpid`、`__xv6_k
 - 涉及模块：`toolchain/cross-riscv64-xv6.txt`、`Makefile`。
 - 验证方式：`make PICOLIBC_EXPERIMENT=1 build` 可通过 `_picohello` 链接，无 libc symbol undefined 错误。
 
-## 10. 阶段 6：跑通 picohello
+### 9.4 Makefile 目标
+
+仓库提供以下目标，但不自动下载外部源码：
+
+- `make picolibc-configure PICOLIBC_SRC=/path/to/picolibc`
+- `make picolibc-build PICOLIBC_SRC=/path/to/picolibc`
+- `make picolibc-install PICOLIBC_SRC=/path/to/picolibc`
+
+默认安装路径为 `opt/picolibc-rv64-xv6`，也可通过 `PICOLIBC_PREFIX=/path/to/install` 覆盖。
+
+## 10. 阶段 6：跑通 picohello（已完成）
 
 依赖：阶段 0/1/2/3/4/5。阶段 3（OS glue）未完成时 picolibc 的 `exit()` 无法通过 `_exit` syscall 返回内核，不宜宣称"已跑通"。
 
@@ -269,6 +283,35 @@ int main(int argc, char **argv) {
   - `printf` 输出正常
   - `malloc/free` 不崩
   - `main` 返回后正确 `exit`，回到 shell
+
+### 10.1 已验证输出
+
+使用脚本化 QEMU 等待 shell prompt 后执行：
+
+```sh
+picohello a b c
+echo done
+```
+
+关键输出：
+
+```text
+hello from picolibc
+argc = 4
+argv[0] = picohello
+argv[1] = a
+argv[2] = b
+argv[3] = c
+malloc(32) = 0x5010
+done
+```
+
+结论：
+
+- `printf` 可通过 `write` syscall 输出
+- `argc/argv` 与当前 xv6 `exec()` ABI 匹配
+- `malloc/free` 可通过 `sbrk` 路径工作
+- `main` 返回后经 `exit` / `_exit` 回到 shell
 
 ## 11. 阶段 7：测试与排错
 
@@ -301,6 +344,12 @@ riscv64-unknown-elf-objdump -d build/user/_picohello
 ```
 
 - 验证方式：全部命令输出符合预期。
+
+当前 `_picohello` 已确认：
+
+- `riscv64-unknown-elf-nm -u build/user/_picohello` 无未解析符号
+- ELF entry 为 `0x0`
+- ELF flags 为 `RVC, soft-float ABI`
 
 ### 11.4 常见失败速查
 

@@ -31,3 +31,5 @@ barrier
 /build/go-cache/
 .cache/
 /compile_commands.json
+/external/picolibc/
+/opt/picolibc-rv64-xv6/
