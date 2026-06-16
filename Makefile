@@ -44,6 +44,7 @@ KOBJS = \
   $(KBUILD)/exec.o \
   $(KBUILD)/sysfile.o \
   $(KBUILD)/sysmmap.o \
+  $(KBUILD)/sysnetcall.o \
   $(KBUILD)/kernelvec.o \
   $(KBUILD)/plic.o \
   $(KBUILD)/virtio_disk.o \

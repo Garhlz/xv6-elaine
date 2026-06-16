@@ -15,6 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "sysfile_internal.h"
 
 // 取第 arg_index 个系统调用参数作为文件描述符，返回描述符编号和对应的 `struct file` 指针。
 // out_fd / out_file 可以为 0，表示调用者只关心其中一项。
@@ -35,7 +36,7 @@ static int argfd(int arg_index, int *out_fd, struct file **out_file) {
 
 // 为 file 分配一个空闲的文件描述符编号。
 // 成功时接管 file 的引用（将 file 指针存入 ofile[] 数组）。
-static int fdalloc(struct file *file) {
+int fdalloc(struct file *file) {
     struct proc *proc = myproc();
 
     for (int fd = 0; fd < NOFILE; fd++) {
@@ -546,24 +547,4 @@ uint64 sys_pipe(void) {
         return -1;
     }
     return 0;
-}
-
-// connect(raddr, lport, rport): 创建 UDP socket（net lab）。
-uint64 sys_connect(void) {
-    struct file *file;
-    uint32 raddr, lport, rport;
-
-    if (argint(0, (int *)&raddr) < 0 || argint(1, (int *)&lport) < 0 ||
-        argint(2, (int *)&rport) < 0) {
-        return -1;
-    }
-
-    if (sockalloc(&file, raddr, lport, rport) < 0)
-        return -1;
-    int fd = fdalloc(file);
-    if (fd < 0) {
-        fileclose(file);
-        return -1;
-    }
-    return fd;
 }
