@@ -23,8 +23,8 @@ void syscall(void) {
         const struct syscall_entry *entry = &syscall_table[num];
         uint64 ret = entry->fn();
         p->trapframe->a0 = ret;
-        if (p->tracemask & (1ULL << num)) {
-            printf("%d: syscall %s -> %d\n", p->pid, entry->name, ret);
+        if (num < 64 && (p->tracemask & (1ULL << num))) {
+            printf("%d: syscall %s -> %d\n", p->pid, entry->name, (int)ret);
         }
     } else {
         printf("%d %s: unknown sys call %d\n", p->pid, p->name, num);

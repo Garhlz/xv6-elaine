@@ -15,7 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
-#include "sysfile_internal.h"
+#include "fd_internal.h"
 
 // 取第 arg_index 个系统调用参数作为文件描述符，返回描述符编号和对应的 `struct file` 指针。
 // out_fd / out_file 可以为 0，表示调用者只关心其中一项。

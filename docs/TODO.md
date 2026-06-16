@@ -22,6 +22,10 @@
   - 涉及模块：`kernel/syscall.c`、`kernel/sysproc.c`、`kernel/proc.c`、`kernel/kalloc.c`、`kernel/sysinfo.h`、`user/trace.c`、`user/sysinfotest.c`。
   - 完成内容：实现 `trace`、`sysinfo`，并保留 net lab 需要的 syscall 条目。
   - 验证方式：`make grade-syscall`、`make smoke`。
+- [x] 完成 syscall 机制层与 handler 初步拆分。
+  - 涉及模块：`kernel/syscall.c`、`kernel/sysarg.c`、`kernel/syscall_table.c`、`kernel/syscall_internal.h`、`kernel/sysfd.c`、`kernel/sysmmap.c`、`kernel/sysnetcall.c`、`kernel/sysfile_internal.h`、`Makefile`。
+  - 完成内容：`syscall.c` 只保留分发/trace，参数提取移到 `sysarg.c`，syscall 注册表移到 `syscall_table.c`，fd/mmap/net handler 从 `sysfile.c` 中拆出。
+  - 验证方式：`make build && make image`、`make test-quick`、`make test-mmap`、`make grade-syscall`、`nettests-local`。
 - [x] 完成 `pgtbl` lab 集成。
   - 涉及模块：`kernel/proc.c`、`kernel/vm.c`、`kernel/riscv.h`、`user/pgtbltest.c`。
   - 完成内容：集成 `ugetpid`、`vmprint`、`pgaccess`。
@@ -219,6 +223,21 @@ t  - 验证方式：`make test-smoke` 含 40 case 不跑 heavy，`make test-heav
 
 ### 4.2 中期任务
 
+- [ ] 建立稳定的用户态运行时入口（`crt0`）。
+  - 要做什么：明确 `_start -> main -> exit` 的最小启动路径，整理参数传递、返回值退出和 `user/usys.S` / `usys.pl` / `ulib` 之间的职责边界。
+  - 涉及模块：`user/` 启动汇编、`user/usys.pl`、`user/ulib.c`、`user/user.h`、`Makefile`。
+  - 为什么要做：后续如果要规范 `ulibc`，或者桥接外部 libc，需要先把 xv6 自己的用户态启动约定固定下来。
+  - 如何验证：现有所有用户程序可继续启动，`usertests`、`mmaptest`、`nettests` 行为不变。
+- [ ] 规范化当前 `ulibc` / 用户态支持层。
+  - 要做什么：区分 syscall stub、启动代码、字符串/内存函数、printf、malloc、文件 API 包装，减少“一个文件混很多层”的状态，并补齐最小但一致的 C 运行时约定。
+  - 涉及模块：`user/ulib.c`、`user/printf.c`、`user/umalloc.c`、`user/user.h`、`user/usys.pl`。
+  - 为什么要做：这一步比直接接 `newlib` 风险更低，也更能暴露 xv6 当前 syscall ABI、errno 约定、fd 语义和内存分配接口到底缺什么。
+  - 如何验证：`make build`、`make test-quick`、`make test-smoke`，并确认用户程序二进制大小和行为没有异常回归。
+- [ ] 评估桥接简化 libc（例如 `newlib`）的最小可行路径。
+  - 要做什么：在 `crt0` 和 `ulibc` 边界稳定后，盘点 `newlib` 所需的 syscall/ABI 适配层，例如 `_sbrk`、`_write`、`_read`、`_close`、`_fstat`、`_isatty`、`_lseek`、`_exit`，以及 `errno`、reentrancy、初始化顺序等问题。
+  - 涉及模块：用户态启动代码、syscall ABI、fd 语义、内存分配接口，可能新增独立 compatibility layer。
+  - 为什么要做：直接桥接 `newlib` 不难编译，但很容易把不清晰的 syscall 约定和运行时缺口一起放大；应在边界清楚后再做。
+  - 如何验证：先实现最小 hello/stdio 场景，再逐步验证 `malloc`、文件 I/O、参数传递和错误路径。
 - [ ] 重构 VMA 管理模块。
   - 要做什么：将 VMA 查找、分配、拆分、写回、清理逻辑从 `kernel/proc.c` 中拆出，形成更清晰的模块边界。
   - 涉及模块：`kernel/proc.c`、`kernel/proc.h`、可能新增 `kernel/mmap.c` 或 `kernel/vma.c`、`Makefile`。

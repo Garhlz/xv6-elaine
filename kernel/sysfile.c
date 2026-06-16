@@ -15,7 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
-#include "sysfile_internal.h"
+#include "fd_internal.h"
 
 // 创建硬链接 link(old, new): 让 new 指向 old 的同一个 inode。
 uint64 sys_link(void) {

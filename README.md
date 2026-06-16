@@ -149,6 +149,7 @@ make ping
 
 - 计划内 lab 已全部整合到 `dev/all`：`util`、`syscall`、`pgtbl`、`traps`、`cow`、`thread`、`net`、`lock`、`fs`、`mmap`。
 - `conf/lab.mk` 仍保持 `LAB=net`，用于保留 net 相关编译宏和 QEMU 网络配置；`dev/all` 的其他 lab 功能是无条件集成。
+- syscall 相关代码已按职责初步拆分：`kernel/syscall.c` 只保留分发与 trace，参数提取位于 `kernel/sysarg.c`，注册表位于 `kernel/syscall_table.c`，fd/mmap/net syscall 已分别拆到 `kernel/sysfd.c`、`kernel/sysmmap.c`、`kernel/sysnetcall.c`。
 - `docs/lab-migration-plan.md` 记录 lab 迁移历史和关键取舍。
 - `docs/TODO.md` 记录迁移完成后的工程化路线图。
 - `docs/test-migrate.md` 记录 Go host-side runner 迁移计划、当前 smoke 覆盖和 Python grader 对照策略。
@@ -159,7 +160,7 @@ make ping
 
 1. 整理 VM fault path，把 COW 和 mmap 缺页处理从 `trap.c` 中拆出清晰边界。
 2. 审计 mmap、fork、exec、exit 的资源生命周期和错误路径，尤其是完整 Unix mmap fork 语义和 exec 清理失败的两阶段处理。
-3. 继续审计 mmap 边界、推进 kernel 模块拆分（VM fault path）和代码组织重构。
+3. 在 syscall 机制层已经初步拆清后，继续审计 mmap 边界、推进 VM fault path 重构，并视需要整理用户态运行时入口（`crt0`）和 `ulibc` 边界。
 
 ## 测试建议
 

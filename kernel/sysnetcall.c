@@ -15,7 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "net.h"
-#include "sysfile_internal.h"
+#include "fd_internal.h"
 
 // connect(raddr, lport, rport): 创建 UDP socket（net lab）。
 uint64 sys_connect(void) {
