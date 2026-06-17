@@ -198,6 +198,7 @@ PICO_UPROGS = \
 	$(UBUILD)/_picoseek \
 	$(UBUILD)/_picodup2 \
 	$(UBUILD)/_picosys \
+	$(UBUILD)/_picocat \
 	$(UBUILD)/_pico_echo \
 	$(UBUILD)/_pico_sleep
 
@@ -341,6 +342,9 @@ $(PICO_BUILD)/picodup2.o: $(U)/pico/picodup2.c | $(PICO_BUILD) check-picolibc
 $(PICO_BUILD)/picosys.o: $(U)/pico/picosys.c | $(PICO_BUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
 
+$(PICO_BUILD)/picocat.o: $(U)/pico/picocat.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
 $(PICO_BUILD)/echo.o: $(U)/echo.c | $(PICO_BUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -DPICOLIBC_USER -c -o $@ $<
 
@@ -405,6 +409,11 @@ $(UBUILD)/_picosys: $(PICO_OBJS) $(PICO_BUILD)/picosys.o $(U)/pico/user_pico.ld 
 	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picosys.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
 	$(OBJDUMP) -S $@ > $(UBUILD)/picosys.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picosys.sym
+
+$(UBUILD)/_picocat: $(PICO_OBJS) $(PICO_BUILD)/picocat.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picocat.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/picocat.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picocat.sym
 
 $(UBUILD)/_pico_echo: $(PICO_OBJS) $(PICO_BUILD)/echo.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/echo.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)

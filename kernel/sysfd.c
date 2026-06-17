@@ -148,7 +148,6 @@ uint64 sys_lseek(void) {
     struct file *cur_file;
     int offset;
     int whence;
-    uint file_size;
     long base;
     long newoff;
 
@@ -167,8 +166,6 @@ uint64 sys_lseek(void) {
         iunlock(cur_file->ip);
         return -1;
     }
-    file_size = cur_file->ip->size;
-    iunlock(cur_file->ip);
 
     switch (whence) {
     case SEEK_SET:
@@ -178,17 +175,21 @@ uint64 sys_lseek(void) {
         base = cur_file->off;
         break;
     case SEEK_END:
-        base = file_size;
+        base = cur_file->ip->size;
         break;
     default:
+        iunlock(cur_file->ip);
         return -1;
     }
 
     newoff = base + offset;
-    if (newoff < 0 || newoff > 0x7fffffff)
+    if (newoff < 0 || newoff > 0x7fffffff) {
+        iunlock(cur_file->ip);
         return -1;
+    }
 
     cur_file->off = (uint)newoff;
+    iunlock(cur_file->ip);
     return (uint64)newoff;
 }
 
