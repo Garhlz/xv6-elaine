@@ -22,6 +22,10 @@
 #define XV6_O_CREATE 0x200
 #define XV6_O_TRUNC 0x400
 #define XV6_TICKS_PER_SECOND 10
+#define XV6_SUPPORTED_OPEN_FLAGS (O_ACCMODE | O_CREAT | O_TRUNC)
+#define XV6_SEEK_SET 0
+#define XV6_SEEK_CUR 1
+#define XV6_SEEK_END 2
 
 struct xv6_stat {
     int dev;
@@ -34,6 +38,22 @@ struct xv6_stat {
 static int set_errno(int value) {
     errno = value;
     return -1;
+}
+
+static int check_fd(int fd) {
+    if (fd < 0)
+        return set_errno(EBADF);
+
+    return 0;
+}
+
+static int check_io_buffer(const void *buf, size_t n) {
+    if (buf == 0 && n > 0)
+        return set_errno(EFAULT);
+    if (n > INT32_MAX)
+        return set_errno(EINVAL);
+
+    return 0;
 }
 
 static int to_xv6_open_flags(int flags) {
@@ -68,17 +88,17 @@ static void copy_stat(struct stat *st, const struct xv6_stat *xs) {
 
     switch (xs->type) {
     case XV6_T_DIR:
-        st->st_mode = S_IFDIR;
+        st->st_mode = S_IFDIR | 0755;
         break;
     case XV6_T_DEVICE:
-        st->st_mode = S_IFCHR;
+        st->st_mode = S_IFCHR | 0666;
         break;
     case XV6_T_SYMLINK:
-        st->st_mode = S_IFLNK;
+        st->st_mode = S_IFLNK | 0777;
         break;
     case XV6_T_FILE:
     default:
-        st->st_mode = S_IFREG;
+        st->st_mode = S_IFREG | 0644;
         break;
     }
 }
@@ -92,8 +112,10 @@ __attribute__((noreturn)) void _exit(int status) {
 ssize_t write(int fd, const void *buf, size_t n) {
     int ret;
 
-    if (n > INT32_MAX)
-        return set_errno(EINVAL);
+    if (check_fd(fd) < 0)
+        return -1;
+    if (check_io_buffer(buf, n) < 0)
+        return -1;
 
     ret = __xv6_write(fd, buf, (int)n);
     if (ret < 0)
@@ -105,8 +127,10 @@ ssize_t write(int fd, const void *buf, size_t n) {
 ssize_t read(int fd, void *buf, size_t n) {
     int ret;
 
-    if (n > INT32_MAX)
-        return set_errno(EINVAL);
+    if (check_fd(fd) < 0)
+        return -1;
+    if (check_io_buffer(buf, n) < 0)
+        return -1;
 
     ret = __xv6_read(fd, buf, (int)n);
     if (ret < 0)
@@ -116,8 +140,12 @@ ssize_t read(int fd, void *buf, size_t n) {
 }
 
 int close(int fd) {
-    int ret = __xv6_close(fd);
+    int ret;
 
+    if (check_fd(fd) < 0)
+        return -1;
+
+    ret = __xv6_close(fd);
     if (ret < 0)
         return set_errno(EBADF);
 
@@ -125,7 +153,14 @@ int close(int fd) {
 }
 
 int open(const char *path, int flags, ...) {
-    int ret = __xv6_open(path, to_xv6_open_flags(flags));
+    int ret;
+
+    if (path == 0)
+        return set_errno(EFAULT);
+    if ((flags & ~XV6_SUPPORTED_OPEN_FLAGS) != 0)
+        return set_errno(EINVAL);
+
+    ret = __xv6_open(path, to_xv6_open_flags(flags));
 
     if (ret < 0)
         return set_errno(ENOENT);
@@ -134,7 +169,12 @@ int open(const char *path, int flags, ...) {
 }
 
 int unlink(const char *path) {
-    int ret = __xv6_unlink(path);
+    int ret;
+
+    if (path == 0)
+        return set_errno(EFAULT);
+
+    ret = __xv6_unlink(path);
 
     if (ret < 0)
         return set_errno(ENOENT);
@@ -147,8 +187,18 @@ int getpid(void) {
 }
 
 int kill(int pid, int sig) {
+    int ret;
+
     (void)sig;
-    return __xv6_kill(pid);
+
+    if (pid <= 0)
+        return set_errno(EINVAL);
+
+    ret = __xv6_kill(pid);
+    if (ret < 0)
+        return set_errno(ESRCH);
+
+    return ret;
 }
 
 int xv6_sleep_ticks(int ticks) {
@@ -231,6 +281,9 @@ __attribute__((noreturn)) void abort(void) {
 unsigned int sleep(unsigned int seconds) {
     unsigned int ticks;
 
+    if (seconds > INT32_MAX / XV6_TICKS_PER_SECOND)
+        return seconds;
+
     ticks = seconds * 10;
     if (xv6_sleep_ticks((int)ticks) < 0)
         return seconds;
@@ -254,9 +307,15 @@ void *sbrk(intptr_t incr) {
 }
 
 off_t lseek(int fd, off_t offset, int whence) {
-    (void)fd;
     (void)offset;
-    (void)whence;
+
+    if (check_fd(fd) < 0)
+        return (off_t)-1;
+    if (whence != XV6_SEEK_SET && whence != XV6_SEEK_CUR && whence != XV6_SEEK_END) {
+        errno = EINVAL;
+        return (off_t)-1;
+    }
+
     errno = ESPIPE;
     return (off_t)-1;
 }
@@ -268,6 +327,8 @@ int isatty(int fd) {
 int fstat(int fd, struct stat *st) {
     struct xv6_stat xs;
 
+    if (check_fd(fd) < 0)
+        return -1;
     if (st == 0)
         return set_errno(EFAULT);
 
@@ -282,6 +343,8 @@ int stat(const char *path, struct stat *st) {
     int fd;
     int ret;
 
+    if (path == 0)
+        return set_errno(EFAULT);
     if (st == 0)
         return set_errno(EFAULT);
 

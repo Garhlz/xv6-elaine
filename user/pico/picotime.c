@@ -1,6 +1,8 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/times.h>
 #include <unistd.h>
@@ -8,7 +10,9 @@
 int main(int argc, char **argv) {
     struct timeval tv;
     struct tms tms;
+    struct stat st;
     unsigned char entropy[8];
+    char byte;
     clock_t ticks;
     int fd;
     int i;
@@ -48,6 +52,55 @@ int main(int argc, char **argv) {
         return 1;
     }
     printf("missing open errno=%d\n", errno);
+
+    errno = 0;
+    if (write(-1, "x", 1) != -1) {
+        printf("write bad fd unexpectedly succeeded\n");
+        return 1;
+    }
+    printf("bad write errno=%d\n", errno);
+
+    errno = 0;
+    if (read(-1, &byte, 1) != -1) {
+        printf("read bad fd unexpectedly succeeded\n");
+        return 1;
+    }
+    printf("bad read errno=%d\n", errno);
+
+    errno = 0;
+    if (stat(0, &st) != -1) {
+        printf("stat null path unexpectedly succeeded\n");
+        return 1;
+    }
+    printf("null stat errno=%d\n", errno);
+
+    errno = 0;
+    if (gettimeofday(0, 0) != -1) {
+        printf("gettimeofday null unexpectedly succeeded\n");
+        return 1;
+    }
+    printf("null gettimeofday errno=%d\n", errno);
+
+    errno = 0;
+    if (getentropy(0, 1) != -1) {
+        printf("getentropy null unexpectedly succeeded\n");
+        return 1;
+    }
+    printf("null getentropy errno=%d\n", errno);
+
+    errno = 0;
+    if (kill(0, 0) != -1) {
+        printf("kill invalid pid unexpectedly succeeded\n");
+        return 1;
+    }
+    printf("bad kill errno=%d\n", errno);
+
+    errno = 0;
+    if (lseek(-1, 0, SEEK_SET) != (off_t)-1) {
+        printf("lseek bad fd unexpectedly succeeded\n");
+        return 1;
+    }
+    printf("bad lseek errno=%d\n", errno);
 
     return 0;
 }

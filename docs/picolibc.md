@@ -1,6 +1,6 @@
 # Picolibc 接入记录
 
-本文档跟踪 `dev/all` 分支接入 `picolibc` 的进度和计划。与 `lab-migration-plan.md`（历史记录）和 `TODO.md`（工程路线）不同的是，本文件聚焦一条具体技术链路的分阶段落地。当前已完成阶段 0/1/2/3/4/5/6，并推进了阶段 8：`picohello` 已在 xv6 shell 中验证 `printf`、`argc/argv`、`malloc/free` 和 `exit` 路径；`picoio` 已验证 `open/stat/read/write/close/getpid` 路径；`picostdio` 已验证 `fopen/fread/fwrite/fclose` 路径；`picoinit` 已验证 constructor/destructor；`picoecho` 和 `picosleep` 已验证简单程序迁移链路；`picotime` 已验证 time、entropy 和 errno PoC；`_pico_echo` / `_pico_sleep` 已验证真实 native 源码的 Picolibc 变体构建。
+本文档跟踪 `dev/all` 分支接入 `picolibc` 的进度和计划。与 `lab-migration-plan.md`（历史记录）和 `TODO.md`（工程路线）不同的是，本文件聚焦一条具体技术链路的分阶段落地。当前已完成阶段 0/1/2/3/4/5/6，并推进了阶段 8：`picohello` 已在 xv6 shell 中验证 `printf`、`argc/argv`、`malloc/free` 和 `exit` 路径；`picoio` 已验证 `open/stat/read/write/close/getpid` 路径；`picostdio` 已验证 `fopen/fread/fwrite/fclose` 路径；`picoinit` 已验证 constructor/destructor；`picoecho` 和 `picosleep` 已验证简单程序迁移链路；`picotime` 已验证 time、entropy 和 errno smoke；`_pico_echo` / `_pico_sleep` 已验证真实 native 源码的 Picolibc 变体构建。
 
 ## 1. 当前基线
 
@@ -19,7 +19,7 @@
 - `picostdio` 链接规则已接入，stdio 文件 I/O 验证已通过
 - `picoinit` 链接规则已接入，constructor/destructor 验证已通过
 - `picoecho` / `picosleep` 链接规则已接入，简单程序迁移 PoC 已通过
-- `picotime` 链接规则已接入，time/entropy/errno PoC 已通过
+- `picotime` 链接规则已接入，time/entropy/errno smoke 已通过
 - `_pico_echo` / `_pico_sleep` 链接规则已接入，真实 native 源码双运行时验证已通过
 - `make test-picolibc` 已接入 Go runner，单次 QEMU 启动验证全部 Picolibc PoC 程序
 
@@ -483,7 +483,7 @@ P1 接口已补：`open`、`stat`、`unlink`、`getpid`、`kill`、`sleep`。
 - 已验证：`picoio README` 可通过 `open/stat/read/write/close/getpid` 读取并输出 README 前 64 字节
 - 已验证：`picostdio README` 可通过 `fopen/fread/fwrite/fclose` 读取并输出 README 前 64 字节
 - 已验证：`picoecho` / `picosleep` 可作为简单 native 程序迁移前置 PoC
-- 已验证：`picotime` 可通过 `gettimeofday/times/getentropy` 和缺失文件 `errno` 路径跑通 P2 PoC
+- 已验证：`picotime` 可通过 `gettimeofday/times/getentropy`，并覆盖缺失文件、bad fd、NULL pointer、非法 pid、非法 seek 等 errno smoke
 - 已验证：`make test-picolibc` 可在 Go runner 中自动回归全部 Picolibc PoC
 - 已验证：`_pico_echo` / `_pico_sleep` 可由 `user/echo.c` / `user/sleep.c` 真实源码构建，原生 `_echo` / `_sleep` 保持不变
 - 下一步：收紧完整 errno 语义，或开始迁移 `cat` / `wc` / `ls`
@@ -555,6 +555,13 @@ gettimeofday sec=0 usec=200000
 times ticks=2 utime=0 stime=0
 entropy: a2 6b d8 9e 42 b7 70 8f
 missing open errno=2
+bad write errno=9
+bad read errno=9
+null stat errno=14
+null gettimeofday errno=14
+null getentropy errno=14
+bad kill errno=22
+bad lseek errno=9
 ```
 
 ### 12.2 第三阶段：init/fini（已完成）
