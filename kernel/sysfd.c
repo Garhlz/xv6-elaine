@@ -139,3 +139,55 @@ uint64 sys_pipe(void) {
     }
     return 0;
 }
+
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
+uint64 sys_lseek(void) {
+    struct file *f;
+    int offset;
+    int whence;
+    uint file_size;
+    long base;
+    long newoff;
+
+    if (argfd(0, 0, &f) < 0)
+        return -1;
+    if (argint(1, &offset) < 0)
+        return -1;
+    if (argint(2, &whence) < 0)
+        return -1;
+
+    if (f->type != FD_INODE)
+        return -1;
+
+    ilock(f->ip);
+    if (f->ip->type != T_FILE) {
+        iunlock(f->ip);
+        return -1;
+    }
+    file_size = f->ip->size;
+    iunlock(f->ip);
+
+    switch (whence) {
+    case SEEK_SET:
+        base = 0;
+        break;
+    case SEEK_CUR:
+        base = f->off;
+        break;
+    case SEEK_END:
+        base = file_size;
+        break;
+    default:
+        return -1;
+    }
+
+    newoff = base + offset;
+    if (newoff < 0 || newoff > 0x7fffffff)
+        return -1;
+
+    f->off = (uint)newoff;
+    return (uint64)newoff;
+}

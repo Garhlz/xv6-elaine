@@ -49,6 +49,7 @@ Two parallel runtime chains coexist:
 | `picohello.c` | PoC: printf, argc/argv, malloc/free |
 | `picoio.c` | verify: open/stat/read/write/close/getpid |
 | `picostdio.c` | verify: fopen/fread/fwrite/fclose |
+| `picoseek.c` | verify: fseek/ftell/rewind/fgetc |
 | `picoinit.c` | verify: constructor/destructor |
 | `picoecho.c` / `picosleep.c` | program migration PoC |
 | `picotime.c` | verify: time/entropy/errno |
@@ -87,7 +88,7 @@ Two parallel runtime chains coexist:
 - `make test-usertests`: 19 light usertests subtests.
 - `make test-heavy`: only heavy-tagged cases (`bigfile`, `sbrkmuch`, `usertests-full`).
 - `make test-all`: all suites.
-- `make test-picolibc`: picolibc PoC verification (9 programs: picohello, picoio, picostdio, picoinit, picoecho, picosleep, picotime, pico_echo, pico_sleep).
+- `make test-picolibc`: picolibc PoC verification (10 programs: picohello, picoio, picostdio, picoseek, picoinit, picoecho, picosleep, picotime, pico_echo, pico_sleep).
 
 Go runner CLI reference:
 ```bash

@@ -34,6 +34,7 @@ extern uint64 sys_sigreturn(void);
 extern uint64 sys_symlink(void);
 extern uint64 sys_mmap(void);
 extern uint64 sys_munmap(void);
+extern uint64 sys_lseek(void);
 
 // 系统调用表：按系统调用编号索引到对应名称和处理函数。
 // 未初始化项为 0，表示非法 syscall 编号。
@@ -68,6 +69,7 @@ const struct syscall_entry syscall_table[] = {
     [SYS_munmap] = {"munmap", sys_munmap},
     [SYS_connect] = {"connect", sys_connect},
     [SYS_pgaccess] = {"pgaccess", sys_pgaccess},
+    [SYS_lseek] = {"lseek", sys_lseek},
 };
 
 const int syscall_table_size = NELEM(syscall_table);

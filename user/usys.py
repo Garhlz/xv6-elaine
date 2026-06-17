@@ -33,6 +33,7 @@ SYSCALLS = [
     "munmap",
     "connect",
     "pgaccess",
+    "lseek",
 ]
 
 

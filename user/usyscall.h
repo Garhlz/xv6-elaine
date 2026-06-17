@@ -40,4 +40,6 @@ int munmap(void *, uint64);
 int connect(uint32, uint16, uint16);
 int pgaccess(void *base, int len, void *mask);
 
+int lseek(int fd, int offset, int whence);
+
 #endif

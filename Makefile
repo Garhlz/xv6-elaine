@@ -195,6 +195,7 @@ PICO_UPROGS = \
 	$(UBUILD)/_picoecho \
 	$(UBUILD)/_picosleep \
 	$(UBUILD)/_picotime \
+	$(UBUILD)/_picoseek \
 	$(UBUILD)/_pico_echo \
 	$(UBUILD)/_pico_sleep
 
@@ -233,7 +234,8 @@ UPROGS = \
 	$(UBUILD)/_bcachetest \
 	$(UBUILD)/_bigfile \
 	$(UBUILD)/_symlinktest \
-	$(UBUILD)/_mmaptest
+	$(UBUILD)/_mmaptest \
+	$(UBUILD)/_lseektest
 
 ifeq ($(LAB),lazy)
 UPROGS += \
@@ -327,6 +329,9 @@ $(PICO_BUILD)/picosleep.o: $(U)/pico/picosleep.c | $(PICO_BUILD) check-picolibc
 $(PICO_BUILD)/picotime.o: $(U)/pico/picotime.c | $(PICO_BUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
 
+$(PICO_BUILD)/picoseek.o: $(U)/pico/picoseek.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
 $(PICO_BUILD)/echo.o: $(U)/echo.c | $(PICO_BUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -DPICOLIBC_USER -c -o $@ $<
 
@@ -376,6 +381,11 @@ $(UBUILD)/_picotime: $(PICO_OBJS) $(PICO_BUILD)/picotime.o $(U)/pico/user_pico.l
 	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picotime.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
 	$(OBJDUMP) -S $@ > $(UBUILD)/picotime.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picotime.sym
+
+$(UBUILD)/_picoseek: $(PICO_OBJS) $(PICO_BUILD)/picoseek.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picoseek.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/picoseek.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picoseek.sym
 
 $(UBUILD)/_pico_echo: $(PICO_OBJS) $(PICO_BUILD)/echo.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/echo.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
@@ -530,7 +540,7 @@ smoke-py: $(KERNEL) image
 test-quick: $(KERNEL) image
 	$(XV6TEST) run --suite quick
 
-test-picolibc:
+test-picolibc: $(KERNEL)
 	$(MAKE) PICOLIBC_EXPERIMENT=1 image
 	PICOLIBC_EXPERIMENT=1 $(XV6TEST) run --suite picolibc
 

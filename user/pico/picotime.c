@@ -1,3 +1,10 @@
+// picotime — picolibc 时间/熵/errno 综合 PoC 程序。
+//
+// 验证目标：
+//   - gettimeofday() / times() 返回合理的值
+//   - getentropy() 填充伪随机字节
+//   - 各 OS glue 接口的错误路径正确设置并传播 errno
+
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -19,6 +26,8 @@ int main(int argc, char **argv) {
 
     (void)argc;
     (void)argv;
+
+    // ---- 正常路径 ----
 
     if (gettimeofday(&tv, 0) < 0) {
         printf("gettimeofday failed errno=%d\n", errno);
@@ -44,6 +53,10 @@ int main(int argc, char **argv) {
         printf(" %02x", entropy[i]);
     printf("\n");
 
+    // ---- 错误路径验证 ----
+    // 以下测试确认各 OS glue 接口在非法参数时返回 -1 并正确设置 errno
+
+    // open 不存在的文件
     errno = 0;
     fd = open("missing-picotime-file", O_RDONLY);
     if (fd >= 0) {
@@ -53,6 +66,7 @@ int main(int argc, char **argv) {
     }
     printf("missing open errno=%d\n", errno);
 
+    // write 到非法 fd
     errno = 0;
     if (write(-1, "x", 1) != -1) {
         printf("write bad fd unexpectedly succeeded\n");
@@ -60,6 +74,7 @@ int main(int argc, char **argv) {
     }
     printf("bad write errno=%d\n", errno);
 
+    // read 从非法 fd
     errno = 0;
     if (read(-1, &byte, 1) != -1) {
         printf("read bad fd unexpectedly succeeded\n");
@@ -67,6 +82,7 @@ int main(int argc, char **argv) {
     }
     printf("bad read errno=%d\n", errno);
 
+    // stat 时 path==NULL
     errno = 0;
     if (stat(0, &st) != -1) {
         printf("stat null path unexpectedly succeeded\n");
@@ -74,6 +90,7 @@ int main(int argc, char **argv) {
     }
     printf("null stat errno=%d\n", errno);
 
+    // gettimeofday 时 tv==NULL
     errno = 0;
     if (gettimeofday(0, 0) != -1) {
         printf("gettimeofday null unexpectedly succeeded\n");
@@ -81,6 +98,7 @@ int main(int argc, char **argv) {
     }
     printf("null gettimeofday errno=%d\n", errno);
 
+    // getentropy 时 buf==NULL 但 length>0
     errno = 0;
     if (getentropy(0, 1) != -1) {
         printf("getentropy null unexpectedly succeeded\n");
@@ -88,6 +106,7 @@ int main(int argc, char **argv) {
     }
     printf("null getentropy errno=%d\n", errno);
 
+    // kill 非法 pid (pid=0)
     errno = 0;
     if (kill(0, 0) != -1) {
         printf("kill invalid pid unexpectedly succeeded\n");
@@ -95,6 +114,7 @@ int main(int argc, char **argv) {
     }
     printf("bad kill errno=%d\n", errno);
 
+    // lseek 到非法 fd
     errno = 0;
     if (lseek(-1, 0, SEEK_SET) != (off_t)-1) {
         printf("lseek bad fd unexpectedly succeeded\n");

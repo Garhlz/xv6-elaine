@@ -1,7 +1,21 @@
 #!/usr/bin/env python3
 
-"""Generate raw xv6 syscall stubs for picolibc glue."""
+"""为 picolibc 实验链路生成带 __xv6_ 前缀的 raw syscall stub。
 
+与 native user/usys.py 的关键区别：
+  - native: 生成 read / write / exit 等符号 → 与 picolibc 的 POSIX 符号冲突
+  - pico:   生成 __xv6_read / __xv6_write / __xv6_exit 等 → 隔离于 picolibc 的符号空间
+
+每个 stub 的汇编模板：
+  .global __xv6_<name>
+  __xv6_<name>:
+      li a7, SYS_<name>   # 将 syscall 编号装入 a7
+      ecall                # 陷入内核
+      ret                  # 返回用户态，a0 携带 syscall 返回值
+"""
+
+# syscall 列表：name 同时用于符号名和 SYS_<name> 宏。
+# 新增 syscall 只需在此列表追加即可。
 SYSCALLS = [
     "exit",
     "read",
@@ -15,10 +29,12 @@ SYSCALLS = [
     "kill",
     "sleep",
     "uptime",
+    "lseek",
 ]
 
 
 def emit_entry(name):
+    """为单个 syscall 输出汇编 stub。"""
     symbol = f"__xv6_{name}"
     print(f".global {symbol}")
     print(f"{symbol}:")

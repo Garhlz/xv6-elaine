@@ -1,6 +1,6 @@
 # Picolibc 接入记录
 
-本文档跟踪 `dev/all` 分支接入 `picolibc` 的进度和计划。与 `lab-migration-plan.md`（历史记录）和 `TODO.md`（工程路线）不同的是，本文件聚焦一条具体技术链路的分阶段落地。当前已完成阶段 0/1/2/3/4/5/6，并推进了阶段 8：`picohello` 已在 xv6 shell 中验证 `printf`、`argc/argv`、`malloc/free` 和 `exit` 路径；`picoio` 已验证 `open/stat/read/write/close/getpid` 路径；`picostdio` 已验证 `fopen/fread/fwrite/fclose` 路径；`picoinit` 已验证 constructor/destructor；`picoecho` 和 `picosleep` 已验证简单程序迁移链路；`picotime` 已验证 time、entropy 和 errno smoke；`_pico_echo` / `_pico_sleep` 已验证真实 native 源码的 Picolibc 变体构建。
+本文档跟踪 `dev/all` 分支接入 `picolibc` 的进度和计划。与 `lab-migration-plan.md`（历史记录）和 `TODO.md`（工程路线）不同的是，本文件聚焦一条具体技术链路的分阶段落地。当前已完成阶段 0/1/2/3/4/5/6，并推进了阶段 8：`picohello` 已在 xv6 shell 中验证 `printf`、`argc/argv`、`malloc/free` 和 `exit` 路径；`picoio` 已验证 `open/stat/read/write/close/getpid` 路径；`picostdio` 已验证 `fopen/fread/fwrite/fclose` 路径；`picoseek` 已验证 `fseek/ftell/rewind` 路径；`picoinit` 已验证 constructor/destructor；`picoecho` 和 `picosleep` 已验证简单程序迁移链路；`picotime` 已验证 time、entropy 和 errno smoke；`_pico_echo` / `_pico_sleep` 已验证真实 native 源码的 Picolibc 变体构建。
 
 ## 1. 当前基线
 
@@ -17,6 +17,7 @@
 - `picohello` 链接规则已接入，最小运行验证已通过
 - `picoio` 链接规则已接入，P1 文件 I/O 验证已通过
 - `picostdio` 链接规则已接入，stdio 文件 I/O 验证已通过
+- `picoseek` 链接规则已接入，stdio file-position 验证已通过
 - `picoinit` 链接规则已接入，constructor/destructor 验证已通过
 - `picoecho` / `picosleep` 链接规则已接入，简单程序迁移 PoC 已通过
 - `picotime` 链接规则已接入，time/entropy/errno smoke 已通过
@@ -122,7 +123,7 @@ clangd --check=user/pico/picolibc_os.c
 ### 2.1 第一阶段目标
 
 - 在不影响现有 xv6 用户程序的前提下，引入一条 `picolibc` PoC 链路
-- `build/user/_picohello`、`build/user/_picoio`、`build/user/_picostdio`、`build/user/_picoinit`、`build/user/_picoecho`、`build/user/_picosleep`、`build/user/_picotime`、`build/user/_pico_echo`、`build/user/_pico_sleep` 可被打包进 `fs.img` 并在 xv6 shell 中运行
+- `build/user/_picohello`、`build/user/_picoio`、`build/user/_picostdio`、`build/user/_picoseek`、`build/user/_picoinit`、`build/user/_picoecho`、`build/user/_picosleep`、`build/user/_picotime`、`build/user/_pico_echo`、`build/user/_pico_sleep` 可被打包进 `fs.img` 并在 xv6 shell 中运行
 - 先跑通 `printf`、`malloc/free`、`main(argc, argv)` 返回后正常 `exit`，再验证基础 POSIX fd I/O 和 stdio 文件 I/O
 - 保持现有 native 用户程序不变（`cat`、`sh`、`usertests`、`nettests`、`mmaptest`、`make test-quick` 等）
 - 提供独立 `make test-picolibc` 回归入口，不把实验程序混入默认 quick/smoke
@@ -149,7 +150,7 @@ clangd --check=user/pico/picolibc_os.c
 先不替换系统 libc，先做独立的 `picolibc` 实验链路；用 `__xv6_*` raw syscall 隔离符号；用最小 OS glue 跑通 `printf/malloc/exit`；再扩展到基础 fd I/O、stdio 文件 I/O、init/fini 和 time/entropy/errno；确认稳定后，再迁移简单用户程序。
 
 ```text
-crt0 硬化 → scaffold → raw syscall → OS glue → linker script → 构建 picolibc → picohello → picoio/picostdio → init/fini → picoecho/picosleep → picotime → _pico_echo/_pico_sleep → 迁移更多简单程序
+crt0 硬化 → scaffold → raw syscall → OS glue → linker script → 构建 picolibc → picohello → picoio/picostdio/picoseek → init/fini → picoecho/picosleep → picotime → _pico_echo/_pico_sleep → 迁移更多简单程序
 ```
 
 ## 3. 目录与边界设计
@@ -165,6 +166,7 @@ user/pico/
   user_pico.ld          # picolibc 专用 linker script
   picoio.c              # 文件 I/O PoC 测试程序
   picostdio.c           # stdio 文件 I/O PoC 测试程序
+  picoseek.c            # stdio file-position PoC 测试程序
   picoinit.c            # constructor/destructor PoC 测试程序
   picoecho.c            # echo 迁移前置 PoC
   picosleep.c           # sleep 迁移前置 PoC
@@ -207,7 +209,7 @@ PICO_OBJS = \
 关键点：
 
 - 不链接 native `ulib.o` / `printf.o` / `umalloc.o`
-- 只在 `PICOLIBC_EXPERIMENT=1` 时构建 `_picohello`、`_picoio`、`_picostdio`、`_picoinit`、`_picoecho`、`_picosleep`、`_picotime`、`_pico_echo`、`_pico_sleep`
+- 只在 `PICOLIBC_EXPERIMENT=1` 时构建 `_picohello`、`_picoio`、`_picostdio`、`_picoseek`、`_picoinit`、`_picoecho`、`_picosleep`、`_picotime`、`_pico_echo`、`_pico_sleep`
 - native `UPROGS` 与实验 `PICO_UPROGS` 保持分离
 
 ### 5.2 为什么不能混链
@@ -265,7 +267,7 @@ P1/P2（已补充）：`__xv6_open`、`__xv6_unlink`、`__xv6_getpid`、`__xv6_k
 - `read(fd, buf, n)` — 同上
 - `close(fd)` — 直接转 `__xv6_close`
 - `sbrk(n)` — 包装 xv6 `sbrk`，失败返回 `(void *)-1`
-- `lseek(fd, offset, whence)` — xv6 无真正 seek，先返回 `ESPIPE`
+- `lseek(fd, offset, whence)` — 转发到 xv6 `lseek` syscall，支撑 `fseek/ftell/rewind`
 - `isatty(fd)` — 对 `0/1/2` 返回 true
 - `fstat(fd, buf)` — 第一阶段满足 stdio 最小需要，至少不崩
 - `_write/_read/_close/_fstat/_lseek/_sbrk` — 转发到对应非下划线接口，兼容常见 libc backend 符号
@@ -366,7 +368,7 @@ P1/P2（已补充）：`__xv6_open`、`__xv6_unlink`、`__xv6_getpid`、`__xv6_k
 
 依赖：阶段 0/1/2/3/4/5。
 
-- 涉及模块：`user/pico/picohello.c`、`user/pico/picoio.c`、`user/pico/picostdio.c`、`user/pico/picoinit.c`、`user/pico/picoecho.c`、`user/pico/picosleep.c`、`user/pico/picotime.c`。
+- 涉及模块：`user/pico/picohello.c`、`user/pico/picoio.c`、`user/pico/picostdio.c`、`user/pico/picoseek.c`、`user/pico/picoinit.c`、`user/pico/picoecho.c`、`user/pico/picosleep.c`、`user/pico/picotime.c`。
 
 ```c
 #include <stdio.h>
@@ -444,7 +446,7 @@ make qemu
 ```
 
 - 回归入口：`make test-picolibc`
-- 覆盖范围：`picohello`、`picoio`、`picostdio`、`picoinit`、`picoecho`、`picosleep`、`picotime`、`pico_echo`、`pico_sleep`
+- 覆盖范围：`picohello`、`picoio`、`picostdio`、`picoseek`、`picoinit`、`picoecho`、`picosleep`、`picotime`、`pico_echo`、`pico_sleep`
 
 ### 11.3 ELF 检查
 
@@ -482,6 +484,7 @@ P1 接口已补：`open`、`stat`、`unlink`、`getpid`、`kill`、`sleep`。
 - 目标：支撑简单文件 I/O（POSIX fd API 与 `fopen` / `fread` / `fwrite` / `fclose`）
 - 已验证：`picoio README` 可通过 `open/stat/read/write/close/getpid` 读取并输出 README 前 64 字节
 - 已验证：`picostdio README` 可通过 `fopen/fread/fwrite/fclose` 读取并输出 README 前 64 字节
+- 已验证：`picoseek README` 可通过 `fseek/ftell/rewind/fgetc` 验证 stdio file-position
 - 已验证：`picoecho` / `picosleep` 可作为简单 native 程序迁移前置 PoC
 - 已验证：`picotime` 可通过 `gettimeofday/times/getentropy`，并覆盖缺失文件、bad fd、NULL pointer、非法 pid、非法 seek 等 errno smoke
 - 已验证：`make test-picolibc` 可在 Go runner 中自动回归全部 Picolibc PoC
@@ -545,6 +548,7 @@ hello from pico
 
 ```sh
 picotime
+picoseek README
 echo done
 ```
 
@@ -562,6 +566,7 @@ null gettimeofday errno=14
 null getentropy errno=14
 bad kill errno=22
 bad lseek errno=9
+picoseek: OK
 ```
 
 ### 12.2 第三阶段：init/fini（已完成）

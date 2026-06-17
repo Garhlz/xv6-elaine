@@ -634,6 +634,15 @@ func BuiltinSuites() map[string]Suite {
 				QemuMode: QemuModeNormal,
 			},
 			{
+				Name:     "lseektest",
+				Commands: []string{"lseektest"},
+				Expect:   []string{`(?m)^lseektest: OK$`},
+				Reject:   commonRejects(),
+				Tags:     []string{"quick", "syscall"},
+				Timeout:  20 * time.Second,
+				QemuMode: QemuModeNormal,
+			},
+			{
 				Name:     "cowtest",
 				Commands: []string{"cowtest"},
 				Expect: []string{
@@ -697,6 +706,7 @@ func BuiltinSuites() map[string]Suite {
 					"picoecho hello from pico",
 					"picosleep 0",
 					"picotime",
+					"picoseek README",
 					"pico_echo migrated echo",
 					"pico_sleep 0",
 				},
@@ -727,6 +737,7 @@ func BuiltinSuites() map[string]Suite {
 					`(?m)^null getentropy errno=14$`,
 					`(?m)^bad kill errno=22$`,
 					`(?m)^bad lseek errno=9$`,
+					`(?m)^picoseek: OK$`,
 					`(?m)^migrated echo$`,
 				},
 				Reject:   commonRejects(),
