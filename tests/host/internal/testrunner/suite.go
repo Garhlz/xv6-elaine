@@ -684,9 +684,56 @@ func BuiltinSuites() map[string]Suite {
 		},
 	}
 
+	picolibc := Suite{
+		Name: "picolibc",
+		Cases: []Case{
+			{
+				Name: "picolibc-poc",
+				Commands: []string{
+					"picohello a b",
+					"picoio README",
+					"picostdio README",
+					"picoinit",
+					"picoecho hello from pico",
+					"picosleep 0",
+					"picotime",
+					"pico_echo migrated echo",
+					"pico_sleep 0",
+				},
+				Expect: []string{
+					`(?m)^hello from picolibc$`,
+					`(?m)^argc = 3$`,
+					`(?m)^argv\[0\] = picohello$`,
+					`(?m)^argv\[1\] = a$`,
+					`(?m)^argv\[2\] = b$`,
+					`(?m)^malloc\(32\) = 0x[0-9a-f]+$`,
+					`(?m)^picoio pid = \d+$`,
+					`(?m)^stat README size = \d+$`,
+					`(?m)^read 64 bytes from README$`,
+					`(?m)^fread 64 bytes from README$`,
+					`(?m)^constructor ran$`,
+					`(?m)^main sees constructor_ran = 1$`,
+					`(?m)^main sees destructor_ran = 0$`,
+					`(?m)^destructor ran$`,
+					`(?m)^hello from pico$`,
+					`(?m)^gettimeofday sec=\d+ usec=\d+$`,
+					`(?m)^times ticks=\d+ utime=0 stime=0$`,
+					`(?m)^entropy:( [0-9a-f]{2}){8}$`,
+					`(?m)^missing open errno=2$`,
+					`(?m)^migrated echo$`,
+				},
+				Reject:   commonRejects(),
+				Tags:     []string{"picolibc"},
+				Timeout:  40 * time.Second,
+				QemuMode: QemuModeNormal,
+			},
+		},
+	}
+
 	return map[string]Suite{
 		smoke.Name:     smoke,
 		quick.Name:     quick,
+		picolibc.Name:  picolibc,
 		thread.Name:    thread,
 		cow.Name:       cow,
 		traps.Name:     traps,

@@ -13,6 +13,8 @@ SYSCALLS = [
     "unlink",
     "getpid",
     "kill",
+    "sleep",
+    "uptime",
 ]
 
 

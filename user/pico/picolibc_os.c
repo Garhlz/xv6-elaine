@@ -4,7 +4,10 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/times.h>
 #include <sys/types.h>
+#include <time.h>
 
 #include "xv6_syscall_raw.h"
 
@@ -18,6 +21,7 @@
 #define XV6_O_RDWR 0x002
 #define XV6_O_CREATE 0x200
 #define XV6_O_TRUNC 0x400
+#define XV6_TICKS_PER_SECOND 10
 
 struct xv6_stat {
     int dev;
@@ -79,7 +83,7 @@ static void copy_stat(struct stat *st, const struct xv6_stat *xs) {
     }
 }
 
-void _exit(int status) {
+__attribute__((noreturn)) void _exit(int status) {
     __xv6_exit(status);
     for (;;)
         ;
@@ -145,6 +149,93 @@ int getpid(void) {
 int kill(int pid, int sig) {
     (void)sig;
     return __xv6_kill(pid);
+}
+
+int xv6_sleep_ticks(int ticks) {
+    int ret;
+
+    if (ticks < 0)
+        return set_errno(EINVAL);
+
+    ret = __xv6_sleep(ticks);
+    if (ret < 0)
+        return set_errno(EINTR);
+
+    return 0;
+}
+
+int gettimeofday(struct timeval *tv, void *tz) {
+    int ticks;
+
+    (void)tz;
+
+    if (tv == 0)
+        return set_errno(EFAULT);
+
+    ticks = __xv6_uptime();
+    if (ticks < 0)
+        return set_errno(EIO);
+
+    tv->tv_sec = ticks / XV6_TICKS_PER_SECOND;
+    tv->tv_usec = (ticks % XV6_TICKS_PER_SECOND) * 100000;
+    return 0;
+}
+
+clock_t times(struct tms *buf) {
+    int ticks;
+
+    if (buf == 0) {
+        errno = EFAULT;
+        return (clock_t)-1;
+    }
+
+    ticks = __xv6_uptime();
+    if (ticks < 0) {
+        errno = EIO;
+        return (clock_t)-1;
+    }
+
+    memset(buf, 0, sizeof(*buf));
+    return (clock_t)ticks;
+}
+
+int getentropy(void *buffer, size_t length) {
+    unsigned char *bytes;
+    uint32_t state;
+    size_t i;
+
+    if (length > 256)
+        return set_errno(EIO);
+    if (buffer == 0 && length > 0)
+        return set_errno(EFAULT);
+
+    bytes = buffer;
+    state = (uint32_t)__xv6_uptime() ^ (uint32_t)(uintptr_t)buffer ^ 0x9e3779b9U;
+    for (i = 0; i < length; i++) {
+        state = state * 1664525U + 1013904223U;
+        bytes[i] = (unsigned char)(state >> 24);
+    }
+
+    return 0;
+}
+
+__attribute__((noreturn)) void abort(void) {
+    static const char msg[] = "abort\n";
+
+    write(2, msg, sizeof(msg) - 1);
+    _exit(127);
+    for (;;)
+        ;
+}
+
+unsigned int sleep(unsigned int seconds) {
+    unsigned int ticks;
+
+    ticks = seconds * 10;
+    if (xv6_sleep_ticks((int)ticks) < 0)
+        return seconds;
+
+    return 0;
 }
 
 void *sbrk(intptr_t incr) {

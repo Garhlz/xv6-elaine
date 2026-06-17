@@ -14,5 +14,7 @@ int __xv6_open(const char *path, int flags);
 int __xv6_unlink(const char *path);
 int __xv6_getpid(void);
 int __xv6_kill(int pid);
+int __xv6_sleep(int ticks);
+int __xv6_uptime(void);
 
 #endif

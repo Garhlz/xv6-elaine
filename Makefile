@@ -190,7 +190,13 @@ PICO_OBJS = \
 PICO_UPROGS = \
 	$(UBUILD)/_picohello \
 	$(UBUILD)/_picoio \
-	$(UBUILD)/_picostdio
+	$(UBUILD)/_picostdio \
+	$(UBUILD)/_picoinit \
+	$(UBUILD)/_picoecho \
+	$(UBUILD)/_picosleep \
+	$(UBUILD)/_picotime \
+	$(UBUILD)/_pico_echo \
+	$(UBUILD)/_pico_sleep
 
 UPROGS = \
 	$(UBUILD)/_cat \
@@ -309,6 +315,24 @@ $(PICO_BUILD)/picoio.o: $(U)/pico/picoio.c | $(PICO_BUILD) check-picolibc
 $(PICO_BUILD)/picostdio.o: $(U)/pico/picostdio.c | $(PICO_BUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
 
+$(PICO_BUILD)/picoinit.o: $(U)/pico/picoinit.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
+$(PICO_BUILD)/picoecho.o: $(U)/pico/picoecho.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
+$(PICO_BUILD)/picosleep.o: $(U)/pico/picosleep.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
+$(PICO_BUILD)/picotime.o: $(U)/pico/picotime.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
+$(PICO_BUILD)/echo.o: $(U)/echo.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -DPICOLIBC_USER -c -o $@ $<
+
+$(PICO_BUILD)/sleep.o: $(U)/sleep.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -DPICOLIBC_USER -c -o $@ $<
+
 $(PICO_BUILD)/picolibc_os.o: $(U)/pico/picolibc_os.c | $(PICO_BUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
 
@@ -332,6 +356,36 @@ $(UBUILD)/_picostdio: $(PICO_OBJS) $(PICO_BUILD)/picostdio.o $(U)/pico/user_pico
 	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picostdio.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
 	$(OBJDUMP) -S $@ > $(UBUILD)/picostdio.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picostdio.sym
+
+$(UBUILD)/_picoinit: $(PICO_OBJS) $(PICO_BUILD)/picoinit.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picoinit.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/picoinit.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picoinit.sym
+
+$(UBUILD)/_picoecho: $(PICO_OBJS) $(PICO_BUILD)/picoecho.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picoecho.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/picoecho.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picoecho.sym
+
+$(UBUILD)/_picosleep: $(PICO_OBJS) $(PICO_BUILD)/picosleep.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picosleep.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/picosleep.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picosleep.sym
+
+$(UBUILD)/_picotime: $(PICO_OBJS) $(PICO_BUILD)/picotime.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picotime.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/picotime.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picotime.sym
+
+$(UBUILD)/_pico_echo: $(PICO_OBJS) $(PICO_BUILD)/echo.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/echo.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/pico_echo.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/pico_echo.sym
+
+$(UBUILD)/_pico_sleep: $(PICO_OBJS) $(PICO_BUILD)/sleep.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/sleep.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/pico_sleep.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/pico_sleep.sym
 
 $(UBUILD)/_%: $(UBUILD)/%.o $(XV6_ULIB) | $(UBUILD)
 	$(LD) $(LDFLAGS) -N -e _start -Ttext 0 -o $@ $^
@@ -476,6 +530,10 @@ smoke-py: $(KERNEL) image
 test-quick: $(KERNEL) image
 	$(XV6TEST) run --suite quick
 
+test-picolibc:
+	$(MAKE) PICOLIBC_EXPERIMENT=1 image
+	PICOLIBC_EXPERIMENT=1 $(XV6TEST) run --suite picolibc
+
 test-smoke: $(KERNEL) image
 	$(XV6TEST) run --suite smoke
 
@@ -565,4 +623,4 @@ grade-all:
 
 .PHONY: build image clean tags qemu qemu-net qemu-gdb qemu-gdb-net server ping print-gdbport \
 	grade $(addprefix grade-,$(GRADE_LABS)) smoke smoke-py test-quick test-smoke test-smoke-go test-smoke-util test-smoke-syscall test-smoke-pgtbl test-smoke-traps test-smoke-net test-smoke-fs test-smoke-mmap test-smoke-cow test-smoke-thread \
-	test-thread test-cow test-traps test-mmap test-net test-lock test-fs test-usertests test-heavy test-all regression grade-all grade-all-heavy ph barrier
+	test-picolibc test-thread test-cow test-traps test-mmap test-net test-lock test-fs test-usertests test-heavy test-all regression grade-all grade-all-heavy ph barrier

@@ -1,6 +1,11 @@
+#ifdef PICOLIBC_USER
+#include <string.h>
+#include <unistd.h>
+#else
 #include "kernel/types.h"
 #include "kernel/stat.h"
 #include "user/user.h"
+#endif
 
 int main(int argc, char **argv) {
     int i;
@@ -13,5 +18,5 @@ int main(int argc, char **argv) {
             write(1, "\n", 1);
         }
     }
-    exit(0);
+    return 0;
 }
