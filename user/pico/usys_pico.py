@@ -21,15 +21,22 @@ SYSCALLS = [
     "read",
     "write",
     "close",
+    "dup",
+    "pipe",
     "fstat",
     "sbrk",
     "open",
     "unlink",
+    "chdir",
+    "mkdir",
+    "link",
+    "symlink",
     "getpid",
     "kill",
     "sleep",
     "uptime",
     "lseek",
+    "dup2",
 ]
 
 

@@ -35,6 +35,7 @@ extern uint64 sys_symlink(void);
 extern uint64 sys_mmap(void);
 extern uint64 sys_munmap(void);
 extern uint64 sys_lseek(void);
+extern uint64 sys_dup2(void);
 
 // 系统调用表：按系统调用编号索引到对应名称和处理函数。
 // 未初始化项为 0，表示非法 syscall 编号。
@@ -70,6 +71,7 @@ const struct syscall_entry syscall_table[] = {
     [SYS_connect] = {"connect", sys_connect},
     [SYS_pgaccess] = {"pgaccess", sys_pgaccess},
     [SYS_lseek] = {"lseek", sys_lseek},
+    [SYS_dup2] = {"dup2", sys_dup2},
 };
 
 const int syscall_table_size = NELEM(syscall_table);

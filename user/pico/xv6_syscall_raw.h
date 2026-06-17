@@ -24,14 +24,21 @@ void __xv6_exit(int status) __attribute__((noreturn));
 int __xv6_read(int fd, void *buf, int n);
 int __xv6_write(int fd, const void *buf, int n);
 int __xv6_close(int fd);
+int __xv6_dup(int fd);
+int __xv6_pipe(int *fdarray);
 int __xv6_fstat(int fd, void *st);
 void *__xv6_sbrk(int n);
 
 // P1: 文件 API 和进程管理
 int __xv6_open(const char *path, int flags);
 int __xv6_unlink(const char *path);
+int __xv6_chdir(const char *path);
+int __xv6_mkdir(const char *path);
+int __xv6_link(const char *oldpath, const char *newpath);
+int __xv6_symlink(const char *target, const char *path);
 int __xv6_getpid(void);
 int __xv6_kill(int pid);
+int __xv6_dup2(int old_fd, int new_fd);
 
 // P2: 时间、休眠和文件定位
 int __xv6_sleep(int ticks);

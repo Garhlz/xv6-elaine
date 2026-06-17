@@ -43,13 +43,15 @@ Two parallel runtime chains coexist:
 |---|---|
 | `crt0_entry.S` + `crt0.c` | picolibc-specific startup |
 | `usys_pico.py` | generates `__xv6_*` raw syscall stubs |
-| `picolibc_os.c` | OS glue: `_exit`/`_write`/`_read`/`_sbrk`/`_close`/`_fstat`/`_lseek`/`_isatty`/`_open`/`_getpid` |
+| `picolibc_os.c` | OS glue: `_exit`/`_write`/`_read`/`_sbrk`/`_close`/`_fstat`/`_lseek`/`_dup2`/`_dup`/`_pipe`/`_chdir`/`_mkdir`/`_link`/`_symlink`/`_isatty`/`_open`/`_getpid` |
 | `xv6_syscall_raw.h` + `xv6_pico.h` | raw syscall declarations + shared helpers |
 | `user_pico.ld` | linker script |
 | `picohello.c` | PoC: printf, argc/argv, malloc/free |
 | `picoio.c` | verify: open/stat/read/write/close/getpid |
 | `picostdio.c` | verify: fopen/fread/fwrite/fclose |
 | `picoseek.c` | verify: fseek/ftell/rewind/fgetc |
+| `picodup2.c` | verify: dup2 stdout redirection |
+| `picosys.c` | verify: dup/pipe/chdir/mkdir/link/symlink |
 | `picoinit.c` | verify: constructor/destructor |
 | `picoecho.c` / `picosleep.c` | program migration PoC |
 | `picotime.c` | verify: time/entropy/errno |
@@ -82,13 +84,13 @@ Two parallel runtime chains coexist:
 
 ### Testing — Go runner (primary daily workflow)
 
-- `make test-quick`: fastest subset (~8 cases, no DNS / heavy). For rapid iteration.
+- `make test-quick`: fastest subset (~10 cases, no DNS / heavy). For rapid iteration.
 - `make test-smoke`: default pre-commit check. 40 light cases across all subsystems, per-case QEMU isolation, no DNS or heavy tests.
 - `make test-<lab>` (e.g. `make test-thread`, `make test-mmap`): full per-subsystem suite with default heavy exclusion.
 - `make test-usertests`: 19 light usertests subtests.
 - `make test-heavy`: only heavy-tagged cases (`bigfile`, `sbrkmuch`, `usertests-full`).
 - `make test-all`: all suites.
-- `make test-picolibc`: picolibc PoC verification (10 programs: picohello, picoio, picostdio, picoseek, picoinit, picoecho, picosleep, picotime, pico_echo, pico_sleep).
+- `make test-picolibc`: picolibc PoC verification (12 programs: picohello, picoio, picostdio, picoseek, picodup2, picosys, picoinit, picoecho, picosleep, picotime, pico_echo, pico_sleep).
 
 Go runner CLI reference:
 ```bash

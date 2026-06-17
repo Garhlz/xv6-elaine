@@ -145,37 +145,37 @@ uint64 sys_pipe(void) {
 #define SEEK_END 2
 
 uint64 sys_lseek(void) {
-    struct file *f;
+    struct file *cur_file;
     int offset;
     int whence;
     uint file_size;
     long base;
     long newoff;
 
-    if (argfd(0, 0, &f) < 0)
+    if (argfd(0, 0, &cur_file) < 0)
         return -1;
     if (argint(1, &offset) < 0)
         return -1;
     if (argint(2, &whence) < 0)
         return -1;
 
-    if (f->type != FD_INODE)
+    if (cur_file->type != FD_INODE)
         return -1;
 
-    ilock(f->ip);
-    if (f->ip->type != T_FILE) {
-        iunlock(f->ip);
+    ilock(cur_file->ip);
+    if (cur_file->ip->type != T_FILE) {
+        iunlock(cur_file->ip);
         return -1;
     }
-    file_size = f->ip->size;
-    iunlock(f->ip);
+    file_size = cur_file->ip->size;
+    iunlock(cur_file->ip);
 
     switch (whence) {
     case SEEK_SET:
         base = 0;
         break;
     case SEEK_CUR:
-        base = f->off;
+        base = cur_file->off;
         break;
     case SEEK_END:
         base = file_size;
@@ -188,6 +188,44 @@ uint64 sys_lseek(void) {
     if (newoff < 0 || newoff > 0x7fffffff)
         return -1;
 
-    f->off = (uint)newoff;
+    cur_file->off = (uint)newoff;
     return (uint64)newoff;
+}
+
+// dup2(oldfd, newfd): 将 oldfd 复制到 newfd，若 newfd 已打开则先关闭。
+uint64 sys_dup2(void) {
+    struct proc *proc;
+    struct file *old_file;
+    struct file *replaced_file;
+    int old_fd;
+    int new_fd;
+
+    if (argfd(0, &old_fd, &old_file) < 0) {
+        return -1;
+    }
+
+    if (argint(1, &new_fd) < 0) {
+        return -1;
+    }
+
+    if (new_fd < 0 || new_fd >= NOFILE) {
+        return -1;
+    }
+
+    if (old_fd == new_fd) {
+        return new_fd;
+    }
+
+    proc = myproc();
+
+    // 如果新文件在当前进程中已经打开，就将其关闭
+    if ((replaced_file = proc->ofile[new_fd]) != 0) {
+        // 先清空槽位再关闭
+        proc->ofile[new_fd] = 0;
+        fileclose(replaced_file);
+    }
+
+    proc->ofile[new_fd] = filedup(old_file);
+
+    return new_fd;
 }

@@ -51,6 +51,7 @@
 #define XV6_SEEK_CUR 1                                           // 从当前位置偏移
 #define XV6_SEEK_END 2                                           // 从文件末尾偏移
 
+#define XV6_NOFILE 16
 // xv6 内核的 stat 结构体私有副本。
 // 不能直接使用 kernel/stat.h，因为会和 <sys/stat.h> 冲突。
 struct xv6_stat {
@@ -71,7 +72,7 @@ static int set_errno(int value) {
 
 // 检查文件描述符是否合法。
 static int check_fd(int fd) {
-    if (fd < 0)
+    if (fd < 0 || fd >= XV6_NOFILE)
         return set_errno(EBADF);
     return 0;
 }
@@ -200,6 +201,32 @@ int close(int fd) {
     return ret;
 }
 
+int dup(int fd) {
+    int ret;
+
+    if (check_fd(fd) < 0)
+        return -1;
+
+    ret = __xv6_dup(fd);
+    if (ret < 0)
+        return set_errno(EBADF);
+
+    return ret;
+}
+
+int pipe(int fdarray[2]) {
+    int ret;
+
+    if (fdarray == 0)
+        return set_errno(EFAULT);
+
+    ret = __xv6_pipe(fdarray);
+    if (ret < 0)
+        return set_errno(EMFILE);
+
+    return ret;
+}
+
 // open(path, flags, ...): 打开文件，返回文件描述符。
 // flags 支持 O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_TRUNC。
 // 目前不支持 O_CREAT 时的 mode 参数，变长参数会被忽略。
@@ -215,6 +242,78 @@ int open(const char *path, int flags, ...) {
 
     if (ret < 0)
         return set_errno(ENOENT);
+
+    return ret;
+}
+
+int chdir(const char *path) {
+    int ret;
+
+    if (path == 0)
+        return set_errno(EFAULT);
+
+    ret = __xv6_chdir(path);
+    if (ret < 0)
+        return set_errno(ENOENT);
+
+    return ret;
+}
+
+int mkdir(const char *path, mode_t mode) {
+    int ret;
+
+    (void)mode;
+
+    if (path == 0)
+        return set_errno(EFAULT);
+
+    ret = __xv6_mkdir(path);
+    if (ret < 0)
+        return set_errno(EIO);
+
+    return ret;
+}
+
+int dup2(int old_fd, int new_fd) {
+    int ret;
+
+    if (check_fd(old_fd) < 0) {
+        return -1;
+    }
+    if (check_fd(new_fd) < 0) {
+        return -1;
+    }
+
+    ret = __xv6_dup2(old_fd, new_fd);
+    if (ret < 0) {
+        return set_errno(EBADF);
+    }
+
+    return ret;
+}
+
+int link(const char *oldpath, const char *newpath) {
+    int ret;
+
+    if (oldpath == 0 || newpath == 0)
+        return set_errno(EFAULT);
+
+    ret = __xv6_link(oldpath, newpath);
+    if (ret < 0)
+        return set_errno(ENOENT);
+
+    return ret;
+}
+
+int symlink(const char *target, const char *path) {
+    int ret;
+
+    if (target == 0 || path == 0)
+        return set_errno(EFAULT);
+
+    ret = __xv6_symlink(target, path);
+    if (ret < 0)
+        return set_errno(EIO);
 
     return ret;
 }
@@ -397,8 +496,8 @@ void *sbrk(intptr_t incr) {
 off_t lseek(int fd, off_t offset, int whence) {
     int ret;
 
-    if (fd < 0)
-        return set_errno(EBADF);
+    if (check_fd(fd))
+        return -1;
     if (offset < INT32_MIN || offset > INT32_MAX)
         return set_errno(EINVAL);
     if (whence != XV6_SEEK_SET && whence != XV6_SEEK_CUR && whence != XV6_SEEK_END)
@@ -467,6 +566,10 @@ ssize_t _read(int fd, void *buf, size_t n) {
 
 int _close(int fd) {
     return close(fd);
+}
+
+int _dup(int fd) {
+    return dup(fd);
 }
 
 int _fstat(int fd, struct stat *st) {

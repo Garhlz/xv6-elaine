@@ -35,3 +35,4 @@
 #define SYS_pgaccess 30
 
 #define SYS_lseek 31
+#define SYS_dup2 32

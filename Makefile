@@ -196,6 +196,8 @@ PICO_UPROGS = \
 	$(UBUILD)/_picosleep \
 	$(UBUILD)/_picotime \
 	$(UBUILD)/_picoseek \
+	$(UBUILD)/_picodup2 \
+	$(UBUILD)/_picosys \
 	$(UBUILD)/_pico_echo \
 	$(UBUILD)/_pico_sleep
 
@@ -235,7 +237,8 @@ UPROGS = \
 	$(UBUILD)/_bigfile \
 	$(UBUILD)/_symlinktest \
 	$(UBUILD)/_mmaptest \
-	$(UBUILD)/_lseektest
+	$(UBUILD)/_lseektest \
+	$(UBUILD)/_dup2test
 
 ifeq ($(LAB),lazy)
 UPROGS += \
@@ -332,6 +335,12 @@ $(PICO_BUILD)/picotime.o: $(U)/pico/picotime.c | $(PICO_BUILD) check-picolibc
 $(PICO_BUILD)/picoseek.o: $(U)/pico/picoseek.c | $(PICO_BUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
 
+$(PICO_BUILD)/picodup2.o: $(U)/pico/picodup2.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
+$(PICO_BUILD)/picosys.o: $(U)/pico/picosys.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
 $(PICO_BUILD)/echo.o: $(U)/echo.c | $(PICO_BUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -DPICOLIBC_USER -c -o $@ $<
 
@@ -386,6 +395,16 @@ $(UBUILD)/_picoseek: $(PICO_OBJS) $(PICO_BUILD)/picoseek.o $(U)/pico/user_pico.l
 	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picoseek.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
 	$(OBJDUMP) -S $@ > $(UBUILD)/picoseek.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picoseek.sym
+
+$(UBUILD)/_picodup2: $(PICO_OBJS) $(PICO_BUILD)/picodup2.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picodup2.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/picodup2.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picodup2.sym
+
+$(UBUILD)/_picosys: $(PICO_OBJS) $(PICO_BUILD)/picosys.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picosys.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/picosys.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picosys.sym
 
 $(UBUILD)/_pico_echo: $(PICO_OBJS) $(PICO_BUILD)/echo.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/echo.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)

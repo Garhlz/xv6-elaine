@@ -34,6 +34,7 @@ SYSCALLS = [
     "connect",
     "pgaccess",
     "lseek",
+    "dup2",
 ]
 
 
