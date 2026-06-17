@@ -42,10 +42,16 @@ Two parallel runtime chains coexist:
 | File | Purpose |
 |---|---|
 | `crt0_entry.S` + `crt0.c` | picolibc-specific startup |
-| `usys_pico.py` | picolibc-compatible syscall stubs |
-| `xv6_syscall_raw.h` | minimal OS glue for `_write` / `_read` / `_sbrk` / `_exit` |
+| `usys_pico.py` | generates `__xv6_*` raw syscall stubs |
+| `picolibc_os.c` | OS glue: `_exit`/`_write`/`_read`/`_sbrk`/`_close`/`_fstat`/`_lseek`/`_isatty`/`_open`/`_getpid` |
+| `xv6_syscall_raw.h` + `xv6_pico.h` | raw syscall declarations + shared helpers |
 | `user_pico.ld` | linker script |
-| `picohello.c` | PoC test program |
+| `picohello.c` | PoC: printf, argc/argv, malloc/free |
+| `picoio.c` | verify: open/stat/read/write/close/getpid |
+| `picostdio.c` | verify: fopen/fread/fwrite/fclose |
+| `picoinit.c` | verify: constructor/destructor |
+| `picoecho.c` / `picosleep.c` | program migration PoC |
+| `picotime.c` | verify: time/entropy/errno |
 
 ### Other directories
 
@@ -81,6 +87,7 @@ Two parallel runtime chains coexist:
 - `make test-usertests`: 19 light usertests subtests.
 - `make test-heavy`: only heavy-tagged cases (`bigfile`, `sbrkmuch`, `usertests-full`).
 - `make test-all`: all suites.
+- `make test-picolibc`: picolibc PoC verification (9 programs: picohello, picoio, picostdio, picoinit, picoecho, picosleep, picotime, pico_echo, pico_sleep).
 
 Go runner CLI reference:
 ```bash
@@ -104,13 +111,14 @@ Logs: `build/test-logs/<suite>/<case>.log`.
 ### Picolibc experiment
 
 ```bash
-# 手动构建 picolibc 到指定路径后，设置 PICOLIBC_PREFIX 再构建
-# （当前 Makefile 不包含一键构建 picolibc 的 target）
-PICOLIBC_PREFIX=/path/to/picolibc-rv64-xv6 make build PICOLIBC_EXPERIMENT=1
+# 构建并安装 picolibc (one-time)
+make picolibc-configure picolibc-build picolibc-install
 
-# Run picolibc test
-make qemu
-# in xv6 shell: picohello
+# Build with picolibc experiment enabled
+make build PICOLIBC_EXPERIMENT=1
+
+# Run picolibc tests
+make test-picolibc
 ```
 
 Required: `meson`, `ninja`, `riscv64-unknown-elf-gcc`. CI note: picolibc experiment is not in default `make build`; gated behind `PICOLIBC_EXPERIMENT=1`.
