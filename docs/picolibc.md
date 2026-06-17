@@ -297,14 +297,24 @@ P1/P2（已补充）：`__xv6_open`、`__xv6_unlink`、`__xv6_getpid`、`__xv6_k
 - 导出 `end`
 - 产出静态 ELF
 - 保持当前 xv6 `exec()` 可接受的 LOAD segment 布局
+- 使用 `PHDRS` 把 Picolibc 用户程序拆成 `R E` 和 `RW` 两个 `LOAD`，避免生成 `RWE` segment
+- 将 writable segment 起点按 4096 字节对齐，满足当前 `exec()` 对每个 `LOAD` 的页对齐检查
 
 - 涉及模块：`user/pico/user_pico.ld`、`Makefile`。
 - 验证方式：
   ```bash
   riscv64-unknown-elf-readelf -h build/user/_picohello   # entry 指向 _start，无 INTERP
-  riscv64-unknown-elf-readelf -l build/user/_picohello   # LOAD segment 合理
+  riscv64-unknown-elf-readelf -l build/user/_picohello   # LOAD segment 为 R E / RW
   riscv64-unknown-elf-nm -u build/user/_picohello        # 无动态链接依赖
   ```
+
+当前 `_picohello` 和 `_picotime` 已确认：
+
+- `make build PICOLIBC_EXPERIMENT=1` 不再出现 `LOAD segment with RWX permissions` warning
+- `readelf -l` 显示第一个 `LOAD` 为 `R E`，第二个 `LOAD` 为 `RW`
+- 两个 `LOAD` 的 `VirtAddr` 均按页对齐，例如 `0x0` 和 `0x3000`
+
+注意：这一步只修正 ELF 文件布局。当前内核 `exec()` 仍未按 `ph.flags` 设置用户页 PTE，运行时页权限仍由 `uvmalloc()` 的默认权限决定；真正的 W^X 需要后续单独改 `exec.c` / `vm.c`。
 
 如果 ELF 被 `exec()` 拒绝，优先调整 linker script / 链接参数，不首先修改 `kernel/exec.c`。
 
