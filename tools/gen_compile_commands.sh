@@ -57,6 +57,8 @@ common_riscv_flags="$common_riscv_flags -I."
 
 kernel_c_flags="$common_riscv_flags"
 user_c_flags="$common_riscv_flags"
+pico_c_flags="$common_riscv_flags -isystem opt/picolibc-rv64-xv6/include -march=rv64gc -mabi=lp64"
+pico_s_flags="$target -x assembler-with-cpp $common_riscv_flags -march=rv64gc -mabi=lp64"
 
 kernel_s_flags="$target -x assembler-with-cpp -I. -Ikernel"
 user_s_flags="$target -x assembler-with-cpp -I. -Ikernel"
@@ -109,6 +111,18 @@ rel=${file#"$root_dir"/}
 write_entry "$rel" "$clang $target $user_c_flags -c $rel"
 done
 
+for file in "$root_dir"/user/pico/*.c; do
+[ -f "$file" ] || continue
+rel=${file#"$root_dir"/}
+write_entry "$rel" "$clang $target $pico_c_flags -c $rel"
+done
+
+for rel in user/echo.c user/sleep.c; do
+if [ -f "$root_dir/$rel" ]; then
+write_entry "$rel" "$clang $target $pico_c_flags -DPICOLIBC_USER -c $rel"
+fi
+done
+
 for file in "$root_dir"/user/*.S; do
 [ -f "$file" ] || continue
 rel=${file#"$root_dir"/}
@@ -125,6 +139,12 @@ write_entry "$rel" "$clang $user_s_flags -c $rel"
 fi
 done
 
+for file in "$root_dir"/user/pico/*.S; do
+[ -f "$file" ] || continue
+rel=${file#"$root_dir"/}
+write_entry "$rel" "$clang $pico_s_flags -c $rel"
+done
+
 for file in "$root_dir"/mkfs/*.c; do
 [ -f "$file" ] || continue
 rel=${file#"$root_dir"/}
@@ -132,6 +152,22 @@ write_entry "$rel" "$clang $mkfs_c_flags -c $rel"
 done
 
 printf '\n]\n' >> "$tmp_file"
+
+meson_compile_commands="$root_dir/build/picolibc-rv64/compile_commands.json"
+if [ -f "$meson_compile_commands" ]; then
+python3 - "$tmp_file" "$meson_compile_commands" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+out_path = Path(sys.argv[1])
+meson_path = Path(sys.argv[2])
+
+entries = json.loads(out_path.read_text())
+entries.extend(json.loads(meson_path.read_text()))
+out_path.write_text(json.dumps(entries, indent=2) + "\n")
+PY
+fi
 
 mv "$tmp_file" "$out_file"
 trap - EXIT HUP INT TERM

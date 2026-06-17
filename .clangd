@@ -3,3 +3,30 @@ CompileFlags:
 
 Diagnostics:
   UnusedIncludes: None
+
+---
+If:
+  PathMatch: opt/picolibc-rv64-xv6/.*
+CompileFlags:
+  Add:
+    - --target=riscv64-unknown-elf
+    - -isystem
+    - opt/picolibc-rv64-xv6/include
+    - -march=rv64gc
+    - -mabi=lp64
+
+---
+If:
+  PathMatch: external/picolibc/.*
+CompileFlags:
+  Add:
+    - --target=riscv64-unknown-elf
+    - -Ibuild/picolibc-rv64
+    - -Iexternal/picolibc/libc/include
+    - -Iexternal/picolibc/libc/machine/riscv
+    - -Iexternal/picolibc/libc/stdio
+    - -Iexternal/picolibc/libc/locale
+    - -isystem
+    - opt/picolibc-rv64-xv6/include
+    - -march=rv64gc
+    - -mabi=lp64
