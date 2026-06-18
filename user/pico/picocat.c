@@ -17,6 +17,8 @@ static int write_all(int fd, const char *data, ssize_t size) {
 
     offset = 0;
     while (offset < size) {
+        // write() 不保证一次写入要求的所有字节
+        // 所以必须循环写入，直到size全部写入
         written = write(fd, data + offset, (size_t)(size - offset));
         if (written < 0)
             return -1;
@@ -28,9 +30,11 @@ static int write_all(int fd, const char *data, ssize_t size) {
     return 0;
 }
 
+// 输入fd
 static int cat_fd(int fd) {
     ssize_t n;
 
+    // 从 fd 中循环读入到buf中，直到读取完毕
     while ((n = read(fd, buf, sizeof(buf))) > 0) {
         if (write_all(STDOUT_FILENO, buf, n) < 0) {
             fprintf(stderr, "picocat: write error\n");

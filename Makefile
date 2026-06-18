@@ -199,6 +199,10 @@ PICO_UPROGS = \
 	$(UBUILD)/_picodup2 \
 	$(UBUILD)/_picosys \
 	$(UBUILD)/_picocat \
+	$(UBUILD)/_picoregex \
+	$(UBUILD)/_picoregextest \
+	$(UBUILD)/_picogrep \
+	$(UBUILD)/_picowc \
 	$(UBUILD)/_pico_echo \
 	$(UBUILD)/_pico_sleep
 
@@ -345,6 +349,21 @@ $(PICO_BUILD)/picosys.o: $(U)/pico/picosys.c | $(PICO_BUILD) check-picolibc
 $(PICO_BUILD)/picocat.o: $(U)/pico/picocat.c | $(PICO_BUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
 
+$(PICO_BUILD)/picoregex.o: $(U)/pico/picoregex.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
+$(PICO_BUILD)/picoregexlib.o: $(U)/pico/picoregex.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -DPICOREGEX_NO_MAIN -c -o $@ $<
+
+$(PICO_BUILD)/picoregextest.o: $(U)/pico/picoregextest.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
+$(PICO_BUILD)/picogrep.o: $(U)/pico/picogrep.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
+$(PICO_BUILD)/picowc.o: $(U)/pico/picowc.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
 $(PICO_BUILD)/echo.o: $(U)/echo.c | $(PICO_BUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -DPICOLIBC_USER -c -o $@ $<
 
@@ -414,6 +433,26 @@ $(UBUILD)/_picocat: $(PICO_OBJS) $(PICO_BUILD)/picocat.o $(U)/pico/user_pico.ld 
 	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picocat.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
 	$(OBJDUMP) -S $@ > $(UBUILD)/picocat.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picocat.sym
+
+$(UBUILD)/_picoregex: $(PICO_OBJS) $(PICO_BUILD)/picoregex.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picoregex.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/picoregex.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picoregex.sym
+
+$(UBUILD)/_picoregextest: $(PICO_OBJS) $(PICO_BUILD)/picoregexlib.o $(PICO_BUILD)/picoregextest.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picoregexlib.o $(PICO_BUILD)/picoregextest.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/picoregextest.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picoregextest.sym
+
+$(UBUILD)/_picogrep: $(PICO_OBJS) $(PICO_BUILD)/picoregexlib.o $(PICO_BUILD)/picogrep.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picoregexlib.o $(PICO_BUILD)/picogrep.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/picogrep.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picogrep.sym
+
+$(UBUILD)/_picowc: $(PICO_OBJS) $(PICO_BUILD)/picowc.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picowc.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/picowc.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picowc.sym
 
 $(UBUILD)/_pico_echo: $(PICO_OBJS) $(PICO_BUILD)/echo.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/echo.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
