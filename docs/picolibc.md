@@ -27,12 +27,13 @@
 - `picowc`：wc 风格行数、词数、字节数统计
 - `getdentstest`：native `getdents` syscall、目录项类型和 offset 推进
 - `picogetdents`：Picolibc raw `__xv6_getdents` 目录遍历
+- `picodir`：`stat/fstat` 类型映射和 `opendir/readdir/closedir/rewinddir/dirfd`
 - `picoinit`：constructor/destructor
 - `picoecho` / `picosleep`：简单程序迁移 PoC
 - `picotime`：`gettimeofday/times/getentropy` 和 errno smoke
 - `_pico_echo` / `_pico_sleep`：真实 native 源码的 Picolibc 变体
 
-当前 `getdents` 已完成 raw syscall 验证；`opendir/readdir/closedir` 还没有实现，它们属于 libc shim 层，不应做成 syscall。
+当前 `getdents` 已完成 raw syscall 验证，`opendir/readdir/closedir` 已作为 Picolibc shim 实现；它们不需要新增 syscall，底层继续使用 `getdents`。
 
 ## 2. 官方资料
 
@@ -148,6 +149,7 @@ xv6_pico.h            # Picolibc 测试程序使用的 xv6 扩展声明
 - 基础 I/O：`read`、`write`、`close`、`isatty`
 - 文件：`open`、`stat`、`fstat`、`unlink`
 - fd：`dup`、`dup2`、`pipe`
+- 目录：`opendir`、`fdopendir`、`readdir`、`closedir`、`rewinddir`、`dirfd`
 - 定位：`lseek`
 - 内存：`sbrk`
 - 路径：`chdir`、`mkdir`、`link`、`symlink`
@@ -209,12 +211,12 @@ riscv64-unknown-elf-nm -u build/user/_picohello
 
 ### 7.2 Libc / Picolibc Shim 层
 
-建议下一阶段补：
+已补：
 
 - `opendir(path)`：内部 `open(path, O_RDONLY)`，分配目录状态对象。
 - `readdir(DIR *)`：缓存 `getdents` 返回的一批 `xv6_dent`，逐个转换成 Picolibc `struct dirent`。
 - `closedir(DIR *)`：关闭 fd 并释放状态对象。
-- `rewinddir(DIR *)`：回到目录开头。可以要求目录 fd 支持 `lseek(fd, 0, SEEK_SET)`，也可以在 shim 层单独处理。
+- `rewinddir(DIR *)`：通过 `lseek(fd, 0, SEEK_SET)` 回到目录开头。
 - `dirfd(DIR *)`：返回底层 fd，很多程序会用。
 
 可以晚点做：
@@ -244,8 +246,8 @@ riscv64-unknown-elf-nm -u build/user/_picohello
 - 已完成 raw `getdents`
 - 已完成 native `getdentstest`
 - 已完成 Picolibc `picogetdents`
+- 已完成 `opendir/readdir/closedir/rewinddir/dirfd`
 - 下一步实现简版 `picols`
-- 之后再决定是否抽出 `opendir/readdir/closedir`
 
 验收标准：
 
@@ -254,10 +256,10 @@ riscv64-unknown-elf-nm -u build/user/_picohello
 
 ### 阶段 10：stat 语义补强
 
-- 补强 xv6 `stat` 到 Picolibc `struct stat` 的转换。
-- 明确 `S_IFREG`、`S_IFDIR`、`S_IFCHR`、symlink 的映射。
-- 为 `st_mode` 添加合理默认权限位，例如 regular file `0644`、directory `0755`。
-- 补齐 `st_ino`、`st_nlink`、`st_size` 等 xv6 已有语义。
+- 已补强 xv6 `stat` 到 Picolibc `struct stat` 的转换。
+- 已明确 `S_IFREG`、`S_IFDIR`、`S_IFCHR`、symlink 的映射。
+- 已为 `st_mode` 添加合理默认权限位，例如 regular file `0644`、directory `0755`。
+- 已补齐 `st_dev`、`st_rdev`、`st_ino`、`st_nlink`、`st_size`、`st_blksize`、`st_blocks` 等 xv6 已有语义或稳定近似值。
 
 不要伪造过多 POSIX 字段。xv6 没有 uid/gid、真实时间戳和完整权限模型时，保持字段最小且可解释。
 
@@ -284,4 +286,4 @@ riscv64-unknown-elf-nm -u build/user/_picohello
 - `malloc` 崩溃：检查 `sbrk()` 返回旧 break、失败返回 `(void *)-1`。
 - ELF 被 `exec()` 拒绝：先查 `readelf -l`，优先调 linker script。
 - errno 异常：xv6 内核不返回具体 errno，用户态只能做近似映射。
-- `readdir` undefined：当前尚未实现 `opendir/readdir/closedir` shim，先使用 raw `getdents` 或 `picogetdents`。
+- `readdir` 行为异常：先确认底层 `getdents` / `picogetdents` 仍通过，再检查 `DIR` 缓冲区 offset/count 维护。

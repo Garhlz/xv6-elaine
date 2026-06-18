@@ -19,9 +19,11 @@
 //
 
 #include <errno.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -51,6 +53,7 @@
 #define XV6_SEEK_CUR 1                                           // 从当前位置偏移
 #define XV6_SEEK_END 2                                           // 从文件末尾偏移
 
+#define XV6_DIRSIZ 14
 #define XV6_NOFILE 16
 // xv6 内核的 stat 结构体私有副本。
 // 不能直接使用 kernel/stat.h，因为会和 <sys/stat.h> 冲突。
@@ -60,6 +63,15 @@ struct xv6_stat {
     short type;
     short nlink;
     uint64_t size;
+};
+
+// xv6 getdents() 输出 ABI 的私有副本。
+// 保持和 kernel/dirent.h 的 struct xv6_dent 字段布局一致。
+struct xv6_dent {
+    uint16_t d_ino;
+    uint16_t d_reclen;
+    uint8_t d_type;
+    char d_name[XV6_DIRSIZ + 1];
 };
 
 // ---- 内部辅助函数 ----
@@ -114,30 +126,51 @@ static int to_xv6_open_flags(int flags) {
     return xv6_flags;
 }
 
-// 将 xv6 内核的 stat 结构转换为 POSIX struct stat。
-// 传递的字段有限（ino, nlink, size, mode），其余填零。
-static void copy_stat(struct stat *st, const struct xv6_stat *xs) {
-    memset(st, 0, sizeof(*st));
-    st->st_ino = xs->ino;
-    st->st_nlink = xs->nlink;
-    st->st_size = xs->size;
-
-    // 根据 xv6 的 inode 类型设置 POSIX 文件模式
-    switch (xs->type) {
+static mode_t mode_from_xv6_type(short type) {
+    switch (type) {
     case XV6_T_DIR:
-        st->st_mode = S_IFDIR | 0755;
-        break;
+        return S_IFDIR | 0755;
     case XV6_T_DEVICE:
-        st->st_mode = S_IFCHR | 0666;
-        break;
+        return S_IFCHR | 0666;
     case XV6_T_SYMLINK:
-        st->st_mode = S_IFLNK | 0777;
-        break;
+        return S_IFLNK | 0777;
     case XV6_T_FILE:
     default:
-        st->st_mode = S_IFREG | 0644;
-        break;
+        return S_IFREG | 0644;
     }
+}
+
+static unsigned char dirent_type_from_xv6_type(uint8_t type) {
+    switch (type) {
+    case XV6_T_DIR:
+        return DT_DIR;
+    case XV6_T_DEVICE:
+        return DT_CHR;
+    case XV6_T_SYMLINK:
+        return DT_LNK;
+    case XV6_T_FILE:
+        return DT_REG;
+    default:
+        return DT_UNKNOWN;
+    }
+}
+
+static int mode_is_dir(mode_t mode) {
+    return (mode & S_IFMT) == S_IFDIR;
+}
+
+// 将 xv6 内核的 stat 结构转换为 POSIX struct stat。
+// 传递的字段有限；没有真实语义的 uid/gid/time 保持为 0。
+static void copy_stat(struct stat *st, const struct xv6_stat *xs) {
+    memset(st, 0, sizeof(*st));
+    st->st_dev = xs->dev;
+    st->st_ino = xs->ino;
+    st->st_mode = mode_from_xv6_type(xs->type);
+    st->st_nlink = xs->nlink;
+    st->st_rdev = xs->type == XV6_T_DEVICE ? xs->dev : 0;
+    st->st_size = xs->size;
+    st->st_blksize = 512;
+    st->st_blocks = (xs->size + 511) / 512;
 }
 
 // ---- POSIX 接口实现 ----
@@ -549,6 +582,115 @@ int stat(const char *path, struct stat *st) {
     ret = fstat(fd, st);
     close(fd);
     return ret;
+}
+
+DIR *fdopendir(int fd) {
+    struct stat st;
+    DIR *dir;
+
+    if (check_fd(fd) < 0)
+        return 0;
+    if (fstat(fd, &st) < 0)
+        return 0;
+    if (!mode_is_dir(st.st_mode)) {
+        errno = ENOTDIR;
+        return 0;
+    }
+
+    dir = calloc(1, sizeof(*dir));
+    if (dir == 0) {
+        errno = ENOMEM;
+        return 0;
+    }
+    dir->fd = fd;
+    return dir;
+}
+
+DIR *opendir(const char *path) {
+    int fd;
+    DIR *dir;
+
+    if (path == 0) {
+        errno = EFAULT;
+        return 0;
+    }
+
+    fd = open(path, O_RDONLY);
+    if (fd < 0)
+        return 0;
+
+    dir = fdopendir(fd);
+    if (dir == 0)
+        close(fd);
+    return dir;
+}
+
+struct dirent *readdir(DIR *dir) {
+    struct xv6_dent *dent;
+    int nread;
+
+    if (dir == 0) {
+        errno = EBADF;
+        return 0;
+    }
+
+    for (;;) {
+        if (dir->offset >= dir->count) {
+            nread = __xv6_getdents(dir->fd, dir->buf, sizeof(dir->buf));
+            if (nread < 0) {
+                errno = EIO;
+                return 0;
+            }
+            if (nread == 0)
+                return 0;
+            dir->offset = 0;
+            dir->count = (size_t)nread;
+        }
+
+        if (dir->count - dir->offset < sizeof(*dent)) {
+            dir->offset = dir->count;
+            continue;
+        }
+
+        dent = (struct xv6_dent *)(dir->buf + dir->offset);
+        dir->offset += sizeof(*dent);
+        if (dent->d_ino == 0)
+            continue;
+
+        memset(&dir->dirent, 0, sizeof(dir->dirent));
+        dir->dirent.d_ino = dent->d_ino;
+        dir->dirent.d_type = dirent_type_from_xv6_type(dent->d_type);
+        strncpy(dir->dirent.d_name, dent->d_name, sizeof(dir->dirent.d_name) - 1);
+        return &dir->dirent;
+    }
+}
+
+int closedir(DIR *dir) {
+    int ret;
+
+    if (dir == 0)
+        return set_errno(EBADF);
+
+    ret = close(dir->fd);
+    free(dir);
+    return ret;
+}
+
+void rewinddir(DIR *dir) {
+    if (dir == 0) {
+        errno = EBADF;
+        return;
+    }
+    if (lseek(dir->fd, 0, XV6_SEEK_SET) < 0)
+        return;
+    dir->offset = 0;
+    dir->count = 0;
+}
+
+int dirfd(DIR *dir) {
+    if (dir == 0)
+        return set_errno(EBADF);
+    return dir->fd;
 }
 
 // ---- picolibc 内部符号适配 ----

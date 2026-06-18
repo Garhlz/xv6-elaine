@@ -239,7 +239,7 @@ uint64 sys_lseek(void) {
         return -1;
 
     ilock(cur_file->ip);
-    if (cur_file->ip->type != T_FILE) {
+    if (cur_file->ip->type != T_FILE && cur_file->ip->type != T_DIR) {
         iunlock(cur_file->ip);
         return -1;
     }
@@ -261,6 +261,10 @@ uint64 sys_lseek(void) {
 
     newoff = base + offset;
     if (newoff < 0 || newoff > 0x7fffffff) {
+        iunlock(cur_file->ip);
+        return -1;
+    }
+    if (cur_file->ip->type == T_DIR && newoff % sizeof(struct dirent) != 0) {
         iunlock(cur_file->ip);
         return -1;
     }
