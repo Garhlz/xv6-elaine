@@ -37,6 +37,7 @@ SYSCALLS = [
     "uptime",
     "lseek",
     "dup2",
+    "getdents",
 ]
 
 

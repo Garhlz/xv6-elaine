@@ -36,3 +36,4 @@
 
 #define SYS_lseek 31
 #define SYS_dup2 32
+#define SYS_getdents 33

@@ -44,5 +44,6 @@ int __xv6_dup2(int old_fd, int new_fd);
 int __xv6_sleep(int ticks);
 int __xv6_uptime(void);
 int __xv6_lseek(int fd, int offset, int whence);
+int __xv6_getdents(int fd, void *buf, int nbytes);
 
 #endif

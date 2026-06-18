@@ -203,6 +203,7 @@ PICO_UPROGS = \
 	$(UBUILD)/_picoregextest \
 	$(UBUILD)/_picogrep \
 	$(UBUILD)/_picowc \
+	$(UBUILD)/_picogetdents \
 	$(UBUILD)/_pico_echo \
 	$(UBUILD)/_pico_sleep
 
@@ -243,7 +244,8 @@ UPROGS = \
 	$(UBUILD)/_symlinktest \
 	$(UBUILD)/_mmaptest \
 	$(UBUILD)/_lseektest \
-	$(UBUILD)/_dup2test
+	$(UBUILD)/_dup2test \
+	$(UBUILD)/_getdentstest
 
 ifeq ($(LAB),lazy)
 UPROGS += \
@@ -364,6 +366,9 @@ $(PICO_BUILD)/picogrep.o: $(U)/pico/picogrep.c | $(PICO_BUILD) check-picolibc
 $(PICO_BUILD)/picowc.o: $(U)/pico/picowc.c | $(PICO_BUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
 
+$(PICO_BUILD)/picogetdents.o: $(U)/pico/picogetdents.c | $(PICO_BUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -c -o $@ $<
+
 $(PICO_BUILD)/echo.o: $(U)/echo.c | $(PICO_BUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) $(PICOLIBC_INC) -DPICOLIBC_USER -c -o $@ $<
 
@@ -453,6 +458,11 @@ $(UBUILD)/_picowc: $(PICO_OBJS) $(PICO_BUILD)/picowc.o $(U)/pico/user_pico.ld | 
 	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picowc.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
 	$(OBJDUMP) -S $@ > $(UBUILD)/picowc.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picowc.sym
+
+$(UBUILD)/_picogetdents: $(PICO_OBJS) $(PICO_BUILD)/picogetdents.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
+	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/picogetdents.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)
+	$(OBJDUMP) -S $@ > $(UBUILD)/picogetdents.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(UBUILD)/picogetdents.sym
 
 $(UBUILD)/_pico_echo: $(PICO_OBJS) $(PICO_BUILD)/echo.o $(U)/pico/user_pico.ld | $(UBUILD) check-picolibc
 	$(CC) $(PICO_CFLAGS) -nostdlib -nostartfiles -T $(U)/pico/user_pico.ld -o $@ $(PICO_OBJS) $(PICO_BUILD)/echo.o $(PICOLIBC_LIBS) $(PICO_LIBGCC)

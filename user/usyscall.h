@@ -42,5 +42,6 @@ int pgaccess(void *base, int len, void *mask);
 
 int lseek(int fd, int offset, int whence);
 int dup2(int old_fd, int new_fd);
+int getdents(int fd, void *buf, int nbytes);
 
 #endif

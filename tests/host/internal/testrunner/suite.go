@@ -652,6 +652,15 @@ func BuiltinSuites() map[string]Suite {
 				QemuMode: QemuModeNormal,
 			},
 			{
+				Name:     "getdentstest",
+				Commands: []string{"getdentstest"},
+				Expect:   []string{`(?m)^getdentstest: OK$`},
+				Reject:   commonRejects(),
+				Tags:     []string{"quick", "syscall"},
+				Timeout:  20 * time.Second,
+				QemuMode: QemuModeNormal,
+			},
+			{
 				Name:     "cowtest",
 				Commands: []string{"cowtest"},
 				Expect: []string{
@@ -725,6 +734,7 @@ func BuiltinSuites() map[string]Suite {
 					"picogrep RISC.V README",
 					"picogrep ^xv6 README",
 					"picowc README",
+					"picogetdents",
 					"pico_echo migrated echo",
 					"pico_sleep 0",
 				},
@@ -765,6 +775,7 @@ func BuiltinSuites() map[string]Suite {
 					`(?m)^but is implemented for a modern RISC-V multiprocessor using ANSI C\.$`,
 					`(?m)^xv6 is a re-implementation of Dennis Ritchie's and Ken Thompson's Unix$`,
 					`(?m)^47 317 2226 README$`,
+					`(?m)^picogetdents: OK$`,
 					`(?m)^migrated echo$`,
 				},
 				Reject:   commonRejects(),

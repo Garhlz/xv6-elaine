@@ -35,6 +35,7 @@ SYSCALLS = [
     "pgaccess",
     "lseek",
     "dup2",
+    "getdents",
 ]
 
 

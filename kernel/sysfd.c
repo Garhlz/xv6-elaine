@@ -16,6 +16,7 @@
 #include "file.h"
 #include "fcntl.h"
 #include "fd_internal.h"
+#include "dirent.h"
 
 // 取第 arg_index 个系统调用参数作为文件描述符，返回描述符编号和对应的 `struct file` 指针。
 // out_fd / out_file 可以为 0，表示调用者只关心其中一项。
@@ -103,6 +104,82 @@ uint64 sys_fstat(void) {
     if (argfd(0, 0, &file) < 0 || argaddr(1, &stat_addr) < 0)
         return -1;
     return filestat(file, stat_addr);
+}
+
+static int get_dirent_type(struct inode *entry_inode) {
+    int type;
+
+    ilock(entry_inode);
+    type = entry_inode->type;
+    iunlockput(entry_inode);
+    return type;
+}
+
+// getdents(fd, buf, n): 将目录 fd 的条目批量转换成 struct xv6_dent 写到用户态。
+uint64 sys_getdents(void) {
+    struct file *file;
+    struct inode *dir;
+    struct proc *proc;
+    struct inode *entry_inode;
+    struct dirent entry;
+    struct xv6_dent dent;
+    uint64 buf_addr;
+    int dent_size;
+    int nbytes;
+    int written;
+    int entry_type;
+
+    if (argfd(0, 0, &file) < 0 || argaddr(1, &buf_addr) < 0 || argint(2, &nbytes) < 0)
+        return -1;
+    if (nbytes < 0)
+        return -1;
+    dent_size = sizeof(dent);
+    if (nbytes < dent_size)
+        return 0;
+    if (file->type != FD_INODE)
+        return -1;
+
+    proc = myproc();
+    dir = file->ip;
+    written = 0;
+
+    while (written + dent_size <= nbytes) {
+        ilock(dir);
+        if (dir->type != T_DIR) {
+            iunlock(dir);
+            return -1;
+        }
+        if (readi(dir, 0, (uint64)&entry, file->off, sizeof(entry)) != sizeof(entry)) {
+            iunlock(dir);
+            break;
+        }
+        file->off += sizeof(entry);
+
+        if (entry.inum == 0) {
+            iunlock(dir);
+            continue;
+        }
+
+        entry_inode = dirlookup(dir, entry.name, 0);
+        iunlock(dir);
+        if (entry_inode == 0)
+            continue;
+        entry_type = get_dirent_type(entry_inode);
+
+        memset(&dent, 0, sizeof(dent));
+        dent.d_ino = entry.inum;
+        dent.d_reclen = dent_size;
+        dent.d_type = entry_type;
+        memmove(dent.d_name, entry.name, DIRSIZ);
+        dent.d_name[DIRSIZ] = '\0';
+
+        if (copyout(proc->pagetable, buf_addr + written, (char *)&dent, dent_size) < 0)
+            return -1;
+
+        written += dent_size;
+    }
+
+    return written;
 }
 
 // pipe(fdarray): 创建管道，将读写两端的 fd 写入用户态数组 fdarray[2]。
