@@ -230,7 +230,7 @@ riscv64-unknown-elf-nm -u build/user/_picohello
 
 推荐顺序：
 
-1. `picols` 简版：直接基于 `__xv6_getdents` 列出目录项。
+1. `picols` 简版：基于 `opendir/readdir/closedir` 列出目录项。
 2. `picols` 文件类型显示：依赖更可靠的 `stat/fstat` 类型映射。
 3. `picols -l`：依赖 `lstat/readlink` 和更完整的 `struct stat` 转换。
 4. `picofind`：验证目录递归和路径拼接。
@@ -252,16 +252,17 @@ riscv64-unknown-elf-nm -u build/user/_picohello
 验收标准：
 
 - `picols .` 至少能列出 `README`、`sh`、`cat` 等 fs image 中的文件。
+- `picols README` 能识别普通文件参数并输出文件自身。
 - `make test-quick` 和 `make test-picolibc` 通过。
 
 ### 阶段 10：stat 语义补强
 
 - 已补强 xv6 `stat` 到 Picolibc `struct stat` 的转换。
-- 已明确 `S_IFREG`、`S_IFDIR`、`S_IFCHR`、symlink 的映射。
+- 已明确 `S_IFREG`、`S_IFDIR`、`S_IFCHR`，并保留 `S_IFLNK` 映射。
 - 已为 `st_mode` 添加合理默认权限位，例如 regular file `0644`、directory `0755`。
 - 已补齐 `st_dev`、`st_rdev`、`st_ino`、`st_nlink`、`st_size`、`st_blksize`、`st_blocks` 等 xv6 已有语义或稳定近似值。
 
-不要伪造过多 POSIX 字段。xv6 没有 uid/gid、真实时间戳和完整权限模型时，保持字段最小且可解释。
+不要伪造过多 POSIX 字段。xv6 没有 uid/gid、真实时间戳和完整权限模型时，保持字段最小且可解释。当前 `stat()` 仍会跟随 symlink；`S_IFLNK` 只有在底层 xv6 ABI 返回 symlink inode 类型时才会出现，完整 symlink 自身语义留给 `lstat/readlink`。
 
 ### 阶段 11：symlink 语义
 

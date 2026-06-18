@@ -49,11 +49,15 @@ static int check_stat_types(void) {
         return -1;
     }
     close(fd);
+    printf("picodir: stat types OK\n");
     return 0;
 }
 
-static int scan_for_readme(DIR *dir) {
+static int scan_directory(DIR *dir, int *saw_readme, int *saw_sh) {
     struct dirent *entry;
+
+    *saw_readme = 0;
+    *saw_sh = 0;
 
     while ((entry = readdir(dir)) != 0) {
         if (strcmp(entry->d_name, "README") == 0) {
@@ -61,7 +65,15 @@ static int scan_for_readme(DIR *dir) {
                 printf("picodir: README dirent type failed\n");
                 return -1;
             }
-            return 1;
+            *saw_readme = 1;
+            continue;
+        }
+        if (strcmp(entry->d_name, "sh") == 0) {
+            if (entry->d_type != DT_REG) {
+                printf("picodir: sh dirent type failed\n");
+                return -1;
+            }
+            *saw_sh = 1;
         }
     }
     return 0;
@@ -70,7 +82,10 @@ static int scan_for_readme(DIR *dir) {
 static int check_dirent_api(void) {
     DIR *dir;
     int fd;
-    int found;
+    int first_fd;
+    int second_fd;
+    int saw_readme;
+    int saw_sh;
 
     dir = opendir(".");
     if (dir == 0) {
@@ -85,16 +100,30 @@ static int check_dirent_api(void) {
         return -1;
     }
 
-    found = scan_for_readme(dir);
-    if (found != 1) {
-        printf("picodir: README not found\n");
+    first_fd = fd;
+    second_fd = dirfd(dir);
+    if (second_fd != first_fd) {
+        printf("picodir: dirfd unstable\n");
+        closedir(dir);
+        return -1;
+    }
+
+    if (scan_directory(dir, &saw_readme, &saw_sh) < 0) {
+        closedir(dir);
+        return -1;
+    }
+    if (!saw_readme || !saw_sh) {
+        printf("picodir: expected entries not found\n");
         closedir(dir);
         return -1;
     }
 
     rewinddir(dir);
-    found = scan_for_readme(dir);
-    if (found != 1) {
+    if (scan_directory(dir, &saw_readme, &saw_sh) < 0) {
+        closedir(dir);
+        return -1;
+    }
+    if (!saw_readme || !saw_sh) {
         printf("picodir: rewinddir failed\n");
         closedir(dir);
         return -1;
@@ -104,6 +133,7 @@ static int check_dirent_api(void) {
         printf("picodir: closedir failed\n");
         return -1;
     }
+    printf("picodir: readdir OK\n");
     return 0;
 }
 
@@ -121,6 +151,7 @@ static int check_invalid_opendir(void) {
         printf("picodir: opendir file errno %d\n", errno);
         return -1;
     }
+    printf("picodir: invalid opendir OK\n");
     return 0;
 }
 
