@@ -654,6 +654,7 @@ static int postfix_to_nfa(struct Regex *regex, struct RegexToken *in, int n,
 }
 
 // 向当前状态集合中加入一个状态。
+// 本质上是在求 epsilon 闭包
 static void addstate(struct Regex *regex, struct RegexStateSet *set, struct RegexState *state,
                      char *text_start, char *pos) {
     if (state == 0)
@@ -704,6 +705,7 @@ static int class_matches(struct RegexState *state, unsigned char ch) {
 }
 
 // 当前状态集合读入字符 c 后，能到达的状态集合。
+// 也就是状态转移
 static void step(struct Regex *regex, struct RegexStateSet *from_set, int c,
                  struct RegexStateSet *to_set, char *text_start, char *next_pos) {
     to_set->n = 0;

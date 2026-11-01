@@ -6,4 +6,4 @@
 .globl _start
 _start:
     call crt0_main
-1:  j 1b          # crt0_main 不应该返回；兜底死循环防止跑飞
+1:  j 1b          # crt0_main 不应该返回；兜底死循环
