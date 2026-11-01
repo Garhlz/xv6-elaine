@@ -43,7 +43,7 @@ Two parallel runtime chains coexist:
 |---|---|
 | `crt0_entry.S` + `crt0.c` | picolibc-specific startup |
 | `usys_pico.py` | generates `__xv6_*` raw syscall stubs |
-| `picolibc_os.c` | OS glue: `_exit`/`_write`/`_read`/`_sbrk`/`_close`/`_fstat`/`_lseek`/`_dup2`/`_dup`/`_pipe`/`_chdir`/`_mkdir`/`_link`/`_symlink`/`_isatty`/`_open`/`_getpid` |
+| `picolibc_os.c` | OS glue: process, fd I/O, stat, seek, directory, path, time, entropy, and errno mapping |
 | `xv6_syscall_raw.h` + `xv6_pico.h` | raw syscall declarations + shared helpers |
 | `user_pico.ld` | linker script |
 | `picohello.c` | PoC: printf, argc/argv, malloc/free |
@@ -53,6 +53,9 @@ Two parallel runtime chains coexist:
 | `picodup2.c` | verify: dup2 stdout redirection |
 | `picosys.c` | verify: dup/pipe/chdir/mkdir/link/symlink |
 | `picocat.c` | verify: cat-style read/write file output |
+| `picoregex.c` / `picoregextest.c` | verify: regex engine and edge cases |
+| `picogrep.c` / `picowc.c` | migrated grep/wc-style tools |
+| `picogetdents.c` / `picodir.c` | verify: raw getdents, dirent shim, and stat type mapping |
 | `picoinit.c` | verify: constructor/destructor |
 | `picoecho.c` / `picosleep.c` | program migration PoC |
 | `picotime.c` | verify: time/entropy/errno |
@@ -85,13 +88,13 @@ Two parallel runtime chains coexist:
 
 ### Testing — Go runner (primary daily workflow)
 
-- `make test-quick`: fastest subset (~10 cases, no DNS / heavy). For rapid iteration.
+- `make test-quick`: fastest subset (11 cases, no DNS / heavy). For rapid iteration.
 - `make test-smoke`: default pre-commit check. 40 light cases across all subsystems, per-case QEMU isolation, no DNS or heavy tests.
 - `make test-<lab>` (e.g. `make test-thread`, `make test-mmap`): full per-subsystem suite with default heavy exclusion.
 - `make test-usertests`: 19 light usertests subtests.
 - `make test-heavy`: only heavy-tagged cases (`bigfile`, `sbrkmuch`, `usertests-full`).
-- `make test-all`: all suites.
-- `make test-picolibc`: picolibc PoC verification (13 programs: picohello, picoio, picostdio, picoseek, picodup2, picosys, picocat, picoinit, picoecho, picosleep, picotime, pico_echo, pico_sleep).
+- `make test-all`: eight subsystem suites; smoke, heavy, and picolibc are separate targets.
+- `make test-picolibc`: build 19 picolibc programs and run one 21-command integration scenario.
 
 Go runner CLI reference:
 ```bash
@@ -156,7 +159,7 @@ New kernel `.c` files must be added to `KOBJS` in the `Makefile`.
 | `ulib.h` | user libc declarations |
 | `usyscall.h` | syscall declarations (generated stubs match these) |
 
-New user `.c` files must be added to `ULIB` in the `Makefile`.
+New user library `.c` files must be added to `XV6_ULIB` in the `Makefile`; user programs belong in `UPROGS`.
 
 ## Coding Style & Naming Conventions
 
@@ -220,7 +223,7 @@ type(scope): short subject
 ### Kernel Module Hygiene
 
 - New kernel `.c` → add to `KOBJS` in `Makefile`.
-- New user `.c` → add to `ULIB` (if library) or `UPROGS` (if program) in `Makefile`.
+- New user `.c` → add to `XV6_ULIB` (if native library) or `UPROGS` (if program) in `Makefile`.
 - After editing any header, run `clangd --check=<file>`.
 - Before every commit, run `clang-format -i` on changed `.c` and `.h` files.
 

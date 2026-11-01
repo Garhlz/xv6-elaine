@@ -186,11 +186,11 @@ riscv64-unknown-elf-nm -u build/user/_picohello
 当前关键回归：
 
 - `make test-quick` 覆盖 native `lseektest`、`dup2test`、`getdentstest`
-- `make test-picolibc` 覆盖 Picolibc PoC 程序，包括 `picogetdents`
+- `make test-picolibc` 构建 19 个 Picolibc 程序，并在一个 QEMU 场景中执行 21 条验证命令，包括 `picogetdents` 和 `picodir`
 
 ## 7. 目录读取后续路线
 
-目录能力是 `ls`、`find`、shell glob、归档工具和很多第三方 C 程序的前置条件。当前 raw `getdents` 已完成，下一步按三层推进。
+目录能力是 `ls`、`find`、shell glob、归档工具和很多第三方 C 程序的前置条件。当前 raw `getdents` 和 libc dirent shim 已完成；目录工具只做收尾，不再优先于 VM/mmap 内核主线。
 
 ### 7.1 Syscall 层
 
@@ -239,9 +239,11 @@ riscv64-unknown-elf-nm -u build/user/_picohello
 
 `pbox` 应该晚于目录和路径语义。它解决的是工具组织方式，不解决底层 OS 能力缺口。
 
-## 8. 后续 Roadmap
+## 8. 收尾 Roadmap
 
-### 阶段 9：目录工具
+Picolibc 已经可以作为 syscall、libc shim 和用户工具的验证平台。下面任务不再与 VM/mmap 内核主线并行扩张，优先只完成简版 `picols`。
+
+### 目录工具
 
 - 已完成 raw `getdents`
 - 已完成 native `getdentstest`
@@ -255,7 +257,7 @@ riscv64-unknown-elf-nm -u build/user/_picohello
 - `picols README` 能识别普通文件参数并输出文件自身。
 - `make test-quick` 和 `make test-picolibc` 通过。
 
-### 阶段 10：stat 语义补强
+### stat 语义补强（已完成）
 
 - 已补强 xv6 `stat` 到 Picolibc `struct stat` 的转换。
 - 已明确 `S_IFREG`、`S_IFDIR`、`S_IFCHR`，并保留 `S_IFLNK` 映射。
@@ -264,14 +266,14 @@ riscv64-unknown-elf-nm -u build/user/_picohello
 
 不要伪造过多 POSIX 字段。xv6 没有 uid/gid、真实时间戳和完整权限模型时，保持字段最小且可解释。当前 `stat()` 仍会跟随 symlink；`S_IFLNK` 只有在底层 xv6 ABI 返回 symlink inode 类型时才会出现，完整 symlink 自身语义留给 `lstat/readlink`。
 
-### 阶段 11：symlink 语义
+### symlink 语义（暂缓）
 
 - 增加 `lstat`。
 - 增加 `readlink`。
 - 在 Picolibc OS glue 中接入 `lstat()` 和 `readlink()`。
 - 扩展 `picols`，至少显示 symlink 类型；如果有 `-l`，显示 `name -> target`。
 
-### 阶段 12：路径和 fd 控制
+### 路径和 fd 控制（暂缓）
 
 - `rename`
 - `getcwd` / `pwd`

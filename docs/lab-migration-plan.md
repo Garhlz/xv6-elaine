@@ -1,6 +1,6 @@
 # 6.S081 2021 实验整合说明
 
-本文档根据 6.S081 / 6.828 2021 课程主页与各实验页整理，目标是帮助当前 `dev/all` 分支逐步整合本地各 lab 分支的功能代码，而不是把每个分支的全部格式化、工具链或临时文件一并搬过来。
+本文档是 10 个 lab 整合到 `dev/all` 的历史记录，保留当时的迁移文件、验证方式和取舍，不再作为当前开发计划。当前优先级以 `TODO.md` 为准，测试入口以 `test-migrate.md` 和 `Makefile` 为准。
 
 参考：
 
@@ -25,8 +25,8 @@
 - 当前构建产物已统一移入 `build/`：kernel 产物在 `build/kernel/`，user programs 在 `build/user/`，host-side tools 在 `build/mkfs/` 与 `build/notxv6/`，文件系统镜像为 `build/fs.img`。
 - 源码树下的旧路径产物（如 `kernel/kernel`、`user/_*`、`fs.img`、`ph`、`barrier`）只作为 `make clean` 清理对象保留。
 - 当前 `make grade-all` 已串联 `util → syscall → net → pgtbl → traps → cow → thread → lock → fs → mmap`，并复用一次统一构建产物。
-- 新的分层入口为 `make build`、`make image`、`make smoke`、`make regression`、`make grade-all-heavy`，其中 `./quick.sh` 仅作为 `make smoke` 的兼容包装。
-- `grade-lab-*` 脚本已统一放入 `graders/`；日常仍通过 `make grade-*`、`make smoke` 和 `make grade-all` 调用。
+- 当前分层入口为 `make build`、`make image`、`make test-quick`、`make test-smoke`、`make test-<subsystem>`、`make test-heavy` 和 `make test-all`。
+- `grade-lab-*` 脚本位于 `graders/`，只作为课程参考和 legacy 对照。
 
 ## 建议整合顺序
 

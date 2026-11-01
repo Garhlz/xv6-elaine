@@ -1,342 +1,106 @@
-# TODO / Roadmap
+# Development Roadmap
 
-本文档记录 `dev/all` 分支在完成 6.S081 / 6.828 2021 xv6 labs 功能整合之后的维护计划。它不是课程 hand-in 清单，而是后续工程化、代码审计、测试分层和文档补强的路线图。
+本文档只记录 `dev/all` 当前仍值得推进的工作。10 个 lab 的整合历史见 `lab-migration-plan.md`，Go runner 的迁移过程见 `test-migrate.md`，Picolibc 的详细状态见 `picolibc.md`。
 
-## 1. 当前状态概览
+## 当前基线
 
-- 当前 `dev/all` 已整合 `util`、`syscall`、`pgtbl`、`traps`、`cow`、`thread`、`net`、`lock`、`fs`、`mmap`。
-- 当前活动 lab 配置仍是 `conf/lab.mk` 中的 `LAB=net`，用于保留 net 相关编译宏和 QEMU 网络配置；其他 lab 功能在 `dev/all` 中无条件集成。
-- 构建产物已统一输出到 `build/`，课程 grader 脚本已统一移动到 `graders/`，日常入口以 `make build`、`make image`、`make test-quick`、`make test-smoke`、`make test-<lab>`、`make test-heavy`、`make test-all` 为主；`make smoke` / `make smoke-py` 保留为 legacy 对照。
-- Go runner 已完成 Phase 0~4 迁移（smoke 40 case、per-subsystem 9 suite、HostOnly 模式、heavy 排除、quick runner）。
-- 用户态已引入最小 `crt0` 运行时、ulibc 模块化拆分（`ustring.c` / `ufile.c` / `ugetpid.c`）、`usys.py` 替代 `usys.pl`。
-- `picolibc` PoC 实验链路已搭建（`user/pico/`），通过 `PICOLIBC_EXPERIMENT=1` 门控；阶段 0/1/2/3/4/5/6 已完成，`picohello` 已验证 `printf`/`malloc`/`exit`，`picoio` 和 `picostdio` 已验证基础文件 I/O，`picoseek` 已验证 `fseek/ftell/rewind/fgetc`，`picodup2` 已验证 `dup2` stdout 重定向，`picosys` 已验证 `dup/pipe/chdir/mkdir/link/symlink`，`picocat` 已验证 cat 风格 `read/write` 文件输出路径，`picoregex` / `picoregextest` / `picogrep` 已验证预编译 regex 引擎和 grep 风格过滤，`picowc` 已验证 wc 风格统计，`picoinit` 已验证 constructor/destructor，`picoecho` / `picosleep` 已验证简单程序迁移前置链路，`picotime` 已验证 time/entropy/errno PoC，`_pico_echo` / `_pico_sleep` 已验证真实源码迁移链路；`make test-picolibc` 已接入 Go runner。
-- 迁移历史与各 lab 取舍记录在 `docs/lab-migration-plan.md`；本文件只跟踪迁移完成后的后续工作。
+- 10 个 6.S081 lab 已整合到 `dev/all`。
+- syscall 分发、参数解析以及 fd、mmap、网络 handler 已按职责拆分。
+- native 用户态已建立统一 crt0，ulibc 已按字符串、文件和 USYSCALL helper 拆分。
+- Go runner 已成为默认测试入口：quick 11 case、smoke 40 case，并支持 per-subsystem、heavy、HostOnly 和网络转发模式。
+- Picolibc 独立链路已支持启动、内存、文件 I/O、stdio、seek、dup/pipe、目录遍历、stat、时间、随机数、regex 和多个实际工具。
+- raw `getdents`、Picolibc `opendir/readdir/closedir/rewinddir/dirfd` 以及 stat 类型映射已经完成。
 
-## 2. 已完成内容
+## P0：统一 VM Fault 路径
 
-### 2.1 Lab 功能整合
+这是当前最高优先级，也是下一阶段最适合作为简历核心成果的内核专题。
 
-- [x] 完成 `util` lab 集成。
-  - 涉及模块：`user/sleep.c`、`user/pingpong.c`、`user/primes.c`、`user/find.c`、`user/xargs.c`、`user/xargstest.sh`、`Makefile`。
-  - 完成内容：加入用户态工具和对应 `UPROGS` / `UEXTRA` 条目。
-  - 验证方式：`make grade-util`、`make smoke`、`make grade-all`。
-- [x] 完成 `syscall` lab 集成。
-  - 涉及模块：`kernel/syscall.c`、`kernel/sysproc.c`、`kernel/proc.c`、`kernel/kalloc.c`、`kernel/sysinfo.h`、`user/trace.c`、`user/sysinfotest.c`。
-  - 完成内容：实现 `trace`、`sysinfo`，并保留 net lab 需要的 syscall 条目。
-  - 验证方式：`make grade-syscall`、`make smoke`。
-- [x] 完成 syscall 机制层与 handler 初步拆分。
-  - 涉及模块：`kernel/syscall.c`、`kernel/sysarg.c`、`kernel/syscall_table.c`、`kernel/syscall_internal.h`、`kernel/sysfd.c`、`kernel/sysmmap.c`、`kernel/sysnetcall.c`、`kernel/sysfile_internal.h`、`Makefile`。
-  - 完成内容：`syscall.c` 只保留分发/trace，参数提取移到 `sysarg.c`，syscall 注册表移到 `syscall_table.c`，fd/mmap/net handler 从 `sysfile.c` 中拆出。
-  - 验证方式：`make build && make image`、`make test-quick`、`make test-mmap`、`make grade-syscall`、`nettests-local`。
-- [x] 完成 `pgtbl` lab 集成。
-  - 涉及模块：`kernel/proc.c`、`kernel/vm.c`、`kernel/riscv.h`、`user/pgtbltest.c`。
-  - 完成内容：集成 `ugetpid`、`vmprint`、`pgaccess`。
-  - 验证方式：`make grade-pgtbl`、`make smoke`。
-- [x] 完成 `traps` lab 集成。
-  - 涉及模块：`kernel/trap.c`、`kernel/proc.c`、`user/alarmtest.c`。
-  - 完成内容：集成 backtrace 与 alarm 相关路径。
-  - 验证方式：`make grade-traps`、`make smoke`。
-- [x] 完成 `cow` lab 集成。
-  - 涉及模块：`kernel/vm.c`、`kernel/kalloc.c`、`kernel/trap.c`、`user/cowtest.c`。
-  - 完成内容：集成 copy-on-write fork、页引用计数和 COW fault 处理。
-  - 验证方式：`make grade-cow`、`make regression`。
-- [x] 完成 `thread` lab 集成。
-  - 涉及模块：`user/uthread.c`、`user/uthread_switch.S`、`notxv6/ph.c`、`notxv6/barrier.c`、`graders/grade-lab-thread`。
-  - 完成内容：集成用户态线程切换、pthread 哈希表练习和 barrier 练习。
-  - 验证方式：`make grade-thread`。
-- [x] 完成 `net` lab 集成。
-  - 涉及模块：`kernel/e1000.c`、`kernel/net.c`、`kernel/sysnet.c`、`user/nettests.c`、`server.py`、`ping.py`。
-  - 完成内容：集成 E1000 收发路径和 nettests 所需 UDP 通路。
-  - 验证方式：`make grade-net`、`make smoke`。
-- [x] 完成 `lock` lab 集成。
-  - 涉及模块：`kernel/kalloc.c`、`kernel/bio.c`、`kernel/stats.c`、`user/kalloctest.c`、`user/bcachetest.c`、`user/stats.c`。
-  - 完成内容：集成 per-CPU allocator、bucketed buffer cache 和统计接口。
-  - 验证方式：`make grade-lock`、`make regression`。
-- [x] 完成 `fs` lab 集成。
-  - 涉及模块：`kernel/fs.c`、`kernel/file.c`、`kernel/sysfile.c`、`kernel/param.h`、`user/bigfile.c`、`user/symlinktest.c`。
-  - 完成内容：集成 double-indirect block、symbolic link 和相关用户态测试。
-  - 验证方式：`make grade-fs`、`make grade-all`。
-- [x] 完成 `mmap` lab 集成。
-  - 涉及模块：`kernel/proc.c`、`kernel/proc.h`、`kernel/sysfile.c`、`kernel/vm.c`、`kernel/trap.c`、`user/mmaptest.c`。
-  - 完成内容：实现 file-backed lazy mmap、`munmap`、基本 `MAP_SHARED` 写回和 syscall buffer 指向 fresh mmap 页的 lazy fault-in。
-  - 验证方式：`make grade-mmap`、`make smoke`。
-
-### 2.2 构建与目录基线
-
-- [x] 整理 `Makefile` 输出路径。
-  - 涉及模块：`Makefile`、`mkfs/mkfs.c`。
-  - 完成内容：将 kernel、user programs、host tools、文件系统镜像和调试产物输出到 `build/`；`mkfs` 使用 basename 写入 xv6 image，支持 `build/user/_*` 输入路径。
-  - 验证方式：`make clean && make build image`，并确认不生成 `kernel/kernel`、`user/_sh`、`fs.img`、`ph`、`barrier` 等旧路径产物。
-- [x] 整理 grader 脚本目录。
-  - 涉及模块：`graders/grade-lab-*`、`Makefile`、`gradelib.py`。
-  - 完成内容：将 `grade-lab-*` 移入 `graders/`，保留 `make grade-*`、`make smoke`、`make grade-all` 作为稳定入口；每个 grader 可直接执行并找到根目录的 `gradelib.py`。
-  - 验证方式：`make smoke`、`graders/grade-lab-util --help`、全体 `graders/grade-lab-* --help`。
-- [x] 建立分层测试入口。
-  - 涉及模块：`Makefile`、`quick.sh`。
-  - 完成内容：新增 `make build`、`make image`、`make smoke`、`make regression`、`make grade-all-heavy`；`quick.sh` 保留为 `make smoke` 兼容包装。
-  - 验证方式：`./quick.sh -n`、`make smoke`。
-- [x] 清理生成物规则。
-  - 涉及模块：`.gitignore`、`Makefile`。
-  - 完成内容：忽略 `build/`、QEMU 输出、pcap 和旧路径残留生成物；删除已跟踪的 `packets.pcap`。
-  - 验证方式：`git status --short` 不显示构建产物。
-
-### 2.3 文档基线
-
-- [x] 更新仓库入口文档。
-  - 涉及模块：`README.md`、`AGENTS.md`。
-  - 完成内容：说明当前 lab 集成状态、常用命令、`build/` 输出目录、`graders/` 目录和测试分层。
-  - 验证方式：检查 README 中命令与 `Makefile` 目标一致。
-- [x] 保留 lab 迁移记录。
-  - 涉及模块：`docs/lab-migration-plan.md`。
-  - 完成内容：记录各 lab 迁移文件、验证方式和关键注意事项。
-  - 验证方式：后续迁移事实变更时同步更新该文档。
-
-### 2.4 Go host-side runner 基线
-
-- [x] 建立 Go runner 并保留 Python grader 对照。
-  - 涉及模块：`tests/host/cmd/xv6test/`、`tests/host/internal/testrunner/`、`go.mod`、`Makefile`、`docs/test-migrate.md`。
-  - 完成内容：新增 `xv6test list` / `xv6test run`，支持 `--suite`、`--case`、`--tags`、`--log-dir`、`--timeout`；保留 `gradelib.py` 与 `graders/grade-lab-*` 作为 legacy 对照。
-  - 验证方式：`GOCACHE=/tmp/go-build-xv6test go test ./...`、`make test-smoke`。
-- [x] 建立最小用户态运行时入口（`crt0`）。
-  - 涉及模块：`user/crt0_entry.S`、`user/crt0.c`、`Makefile`、多个 `user/*.c`。
-  - 完成内容：新增 `_start -> crt0_main() -> main(argc, argv) -> exit(status)` 的最小启动路径；用户程序 ELF entry 统一改为 `_start`；用户程序 `main` 签名统一为 `int main(int argc, char **argv)`。
-  - 验证方式：`make build`、`make image`、`make test-quick`。
-- [x] 迁移第一批 Go smoke case。
-  - 涉及模块：`tests/host/internal/testrunner/suite.go`。
-  - 完成内容：覆盖 util、syscall、pgtbl、traps、net、fs、mmap 的 18 个 smoke case，包括 `pingpong`、`primes`、`xargs`、`trace-*`、`pgtbltest`、`alarmtest`、`nettests`、`symlinktest`、`mmaptest`。
-  - 验证方式：`make test-smoke`，最近一次结果为 `suite smoke: 19 case(s), 0 failure(s)`。
-- [x] 稳定 QEMU 命令注入。
-  - 涉及模块：`tests/host/internal/testrunner/runner.go`、`docs/test-migrate.md`。
-  - 完成内容：使用 xv6 shell prompt 回到结尾位置判定非末尾命令完成；最后一条命令在匹配输出稳定后即可完成；失败日志保存到 `build/test-logs/<suite>/<case>.log`。
-  - 验证方式：定向运行 `xargs`、`trace-children`、`mmaptest` 等多命令或长输出 case，并运行 `make test-smoke`。
-- [x] 修复网络 QEMU 入口的端口转发传递。
-  - 涉及模块：`Makefile`、`tests/host/internal/testrunner/runner.go`。
-  - 完成内容：`make qemu-net` / `make qemu-gdb-net` 显式递归传入 `NETFWD=1`，Go runner 的 net case 也直接传入 `NETFWD=1`，避免目标特定变量在被依赖 recipe 中失效。
-  - 验证方式：`make --no-print-directory -n qemu-net QEMUEXTRA+=-snapshot` 包含 `hostfwd=udp::$(FWDPORT)-:2000`；`nettests-local` 在允许 UDP host forwarding 的环境中通过。
-
-### 2.5 用户态运行时与 libc 基线
-
-- [x] 建立最小用户态运行时入口（`crt0`）。
-  - 涉及模块：`user/crt0_entry.S`、`user/crt0.c`、多个 `user/*.c`、`Makefile`。
-  - 完成内容：新增 `_start -> crt0_main() -> main(argc, argv) -> exit(status)` 的最小启动路径；用户程序 ELF entry 统一改为 `_start`；`main` 签名统一为 `int main(int argc, char **argv)`；`_start` 后加兜底死循环；`crt0_main` 标记 `noreturn`。
-  - 验证方式：`make build`、`make image`、`make test-quick`、`make test-smoke`。
-- [x] 用户态 libc 模块化拆分。
-  - 涉及模块：`user/ustring.c`、`user/ufile.c`、`user/ugetpid.c`、`user/ulib.h`、`user/usyscall.h`、`user/usys.py`、`user/user.h`、`Makefile`。
-  - 完成内容：将原 `user/ulib.c` 按职责拆为字符串/内存（`ustring.c`）、文件 API（`ufile.c`）、快速 pid（`ugetpid.c`）；`usys.pl` 替换为 `usys.py`；头文件拆为 `ulib.h`（libc 声明）+ `usyscall.h`（syscall 声明）+ `user.h`（兼容聚合）。
-  - 验证方式：`make build`、`make test-quick`、`make test-smoke`。
-- [x] 建立 `picolibc` PoC 实验链路并跑通基础 I/O、file-position、init/fini、regex/grep/wc 与 P2 glue。
-  - 涉及模块：`user/pico/`（`crt0_entry.S`、`crt0.c`、`usys_pico.py`、`xv6_syscall_raw.h`、`xv6_pico.h`、`picolibc_os.c`、`user_pico.ld`、`picohello.c`、`picoio.c`、`picostdio.c`、`picoseek.c`、`picodup2.c`、`picosys.c`、`picocat.c`、`picoregex.c`、`picoregex.h`、`picoregextest.c`、`picogrep.c`、`picowc.c`、`picoinit.c`、`picoecho.c`、`picosleep.c`、`picotime.c`）、`user/echo.c`、`user/sleep.c`、`Makefile`、`docs/picolibc.md`。
-  - 完成内容：搭建独立 picolibc 链路并通过 `PICOLIBC_EXPERIMENT=1` 门控；crt0 硬化（noreturn + fallback loop）；`__xv6_*` raw syscall stub 生成；P0/P1/P2 OS glue 接入；`lseek`、`dup2` 及简单已有 xv6 syscall glue 接入；init array 接入；`picohello`、`picoio`、`picostdio`、`picoseek`、`picodup2`、`picosys`、`picocat`、`picoregex`、`picoregextest`、`picogrep`、`picowc`、`picoinit`、`picoecho`、`picosleep`、`picotime`、`_pico_echo`、`_pico_sleep` 链接规则就绪；`picolibc` Go test suite 接入。
-  - 验证方式：`make PICOLIBC_EXPERIMENT=1 build`、`make test-picolibc`、`make test-quick`；xv6 shell 中验证 `picohello`、`picoio README`、`picostdio README`、`picoseek README`、`picodup2`、`picosys`、`picocat README`、`picoregex -s ab xxabyy`、`picoregex -m ab xxabyy`、`picoregextest`、`picogrep RISC.V README`、`picogrep ^xv6 README`、`picowc README`、`picoinit`、`picoecho`、`picosleep 0`、`picotime`、`pico_echo`、`pico_sleep 0`。
-- [x] exec/ELF 流程注释中文化与可读性重构。
-  - 涉及模块：`kernel/exec.c`、`kernel/elf.h`。
-  - 完成内容：`exec.c` 注释全中文化，提取 `open_exec`/`load_elf`/`setup_user_stack`/`save_proc_name`/`commit_exec` 五个 helper，6 步流程标注，变量重命名（`sz1`→`new_sz` 等）；`elf.h` ELF 结构体字段注释中文化；`ulib.c`/`printf.c`/`umalloc.c` 注释中文化 + 变量可读性优化。
-  - 验证方式：`make build`、`make test-quick`。
-- [x] Go runner 完成 Phase 2.5~4 迁移。
-  - 涉及模块：`tests/host/`、`Makefile`。
-  - 完成内容：HostOnly 模式实现（ph/barrier）；per-subsystem 9 suite 接入；heavy tag 默认排除；19 个 usertests subtest 接入 smoke；`test-quick` 极速验证路径；runner 稳定性修复（QEMU 非零退出不再掩盖、WaitGroup drain、outputMatches Reject 检查）。
-  - 验证方式：`make test-quick`、`make test-smoke`（40/40）、`make test-thread`、`make test-heavy`。
-
-### 2.6 文档与仓库约定
-
-- [x] 全面更新 `AGENTS.md`。
-  - 涉及模块：`AGENTS.md`。
-  - 完成内容：kernel 模块拆分表、user 双运行时链、完整 build/test/picolibc 命令、syscall 8 模块对照表、ulibc 文件拆分表、注释翻译与可读性 skill 约定、commit body 格式示例。
-  - 验证方式：与当前 `Makefile` 目标、文件结构一致。
-
-## 3. 进行中 / 部分完成内容
-
-### 3.1 VM fault path 整理
-
-- [ ] 重构 `usertrap()` 中的 page fault 分派。
-  - 当前状态：`kernel/trap.c` 中 `scause=13` 直接调用 `mmap_fault()`；`scause=15` 同时处理 COW、未映射 mmap write fault 和非法访问，逻辑仍集中在 `usertrap()`。
-  - 剩余工作：抽出 `handle_user_page_fault(scause, stval)`，并在其中明确 load fault、store fault、COW、mmap lazy fault 的分派顺序。
-  - 涉及模块：`kernel/trap.c`、`kernel/vm.c`、`kernel/proc.c`、`kernel/defs.h`。
-  - 验证方式：`make grade-cow`、`make grade-mmap`、`make grade-traps`、`make smoke`。
-- [ ] 拆分 COW fault 处理逻辑。
-  - 当前状态：COW 复制、单引用页提权、`PTE_COW` 清理和 `sfence_vma()` 仍直接写在 `usertrap()` 中。
-  - 剩余工作：实现类似 `cow_fault(pagetable_t pagetable, uint64 va)` 的 helper，集中处理引用计数、PTE flags 和失败回滚。
-  - 涉及模块：`kernel/trap.c`、`kernel/vm.c`、`kernel/kalloc.c`、`kernel/riscv.h`。
-  - 验证方式：`make grade-cow`，并补充 COW 与 `copyout()` 交互的定向用例。
+- [ ] 为现有行为补齐基线测试。
+  - 覆盖 load/store page fault、COW、mmap lazy fault、非法地址和权限错误。
+  - 补充 COW 与 `copyout()`、mmap 与 `copyin/copyout/copyinstr` 的交互测试。
+  - 验收：新增测试在重构前通过，并能在故意破坏对应路径时失败。
+- [ ] 提取统一的 user page-fault dispatcher。
+  - 从 `usertrap()` 中抽出 `handle_user_page_fault(scause, stval)`。
+  - 明确 load fault、store fault、COW 和 mmap lazy fault 的判定顺序。
+  - 验收：`trap.c` 只负责 trap 分类和进程终止决策。
+- [ ] 拆分 COW fault helper。
+  - 集中处理单引用页提权、复制页、PTE flags、引用计数和失败回滚。
+  - 统一 trap fault 与 `copyout()` 触发 COW 时的核心逻辑。
+  - 验收：`make test-cow`、`make test-mmap`、`make test-traps`、`make test-smoke` 通过。
 - [ ] 明确 mmap fault 模块边界。
-  - 当前状态：`find_vma()`、`mmap_fault()`、`mmap_unmap()`、`mmap_cleanup()` 仍在 `kernel/proc.c`，VMA 结构在 `kernel/proc.h`。
-  - 剩余工作：评估是否拆出 `kernel/mmap.c` 或 `kernel/vma.c`，让 `proc.c` 只保留进程生命周期调用点。
-  - 涉及模块：`kernel/proc.c`、`kernel/proc.h`、`kernel/sysfile.c`、`kernel/vm.c`。
-  - 验证方式：`make grade-mmap`、`make smoke`。
+  - 将 `find_vma()`、`mmap_fault()`、拆映射和清理逻辑从 `proc.c` 移到独立 `vma.c` 或 `mmap.c`。
+  - `proc.c` 只保留 fork、exit 等生命周期调用点。
+  - 验收：模块职责、锁和 file reference 所有权在文档中可说明。
 
-### 3.2 mmap 语义补强
+## P1：补强 mmap 语义
+
+P1 在 fault-path 重构稳定后推进，不与 P0 同时大改。
 
 - [ ] 完善 mmap 参数校验。
-  - 当前状态：已检查 `length`、`fd`、文件类型、`MAP_SHARED` / `MAP_PRIVATE` 互斥、读写权限和 `mmap_top` 溢出；`offset` 页对齐、非法 `prot` 位、非法 `flags` 位、非零 `addr` 策略仍需审计并补充校验。
-  - 剩余工作：明确并实现 `offset % PGSIZE == 0`、`prot` 仅允许 `PROT_READ | PROT_WRITE | PROT_EXEC`、`flags` 仅允许当前支持的 mmap flags、`addr` 为非 0 时拒绝或文档化忽略。
-  - 涉及模块：`kernel/sysfile.c`、`kernel/fcntl.h`、`user/mmaptest.c`。
-  - 验证方式：新增 mmap 参数错误测试，运行 `make grade-mmap`。
-- [ ] 支持 VMA hole reuse。
-  - 当前状态：`sys_mmap()` 使用 `proc->mmap_top` 顺序递增分配，`munmap()` 后不会复用低地址空洞。
-  - 剩余工作：实现空洞查找策略，避免长期运行进程反复 mmap/munmap 后耗尽 `MMAPBASE` 到 `TRAPFRAME` 的区间。
-  - 涉及模块：`kernel/proc.c`、`kernel/proc.h`、`kernel/sysfile.c`。
-  - 验证方式：新增循环 mmap/munmap 用例，确认地址复用且不覆盖现有 VMA。
+  - 检查非页对齐 offset、非法 `prot`/`flags`、非零 `addr` 和地址溢出。
 - [ ] 支持中间区间 `munmap()`。
-  - 当前状态：`mmap_unmap()` 支持 whole / prefix / suffix，遇到 VMA 中间区间会返回错误。
-  - 剩余工作：实现 VMA split，并正确处理 file refs、offset、length 和已 fault-in 页的写回。
-  - 涉及模块：`kernel/proc.c`、`kernel/vm.c`。
-  - 验证方式：新增 `munmap(p + PGSIZE, PGSIZE)` 类型用例，覆盖 `MAP_PRIVATE` 和 `MAP_SHARED`。
+  - 实现 VMA split，正确更新 file reference、offset、length 和 `MAP_SHARED` 写回。
 - [ ] 审计 mmap fork 语义。
-  - 当前状态：需要检查并确认 `fork()` 中 VMA 元数据、file refs 和已 fault-in mmap 页的行为是否符合预期；原 TODO 已标注完整 Unix mmap fork 语义仍需补齐。
-  - 剩余工作：明确 `MAP_PRIVATE` 已修改页在 fork 后是否形成快照，明确 `MAP_SHARED` 父子可见性和写回语义。
-  - 涉及模块：`kernel/proc.c`、`kernel/vm.c`、`user/mmaptest.c`。
-  - 验证方式：补充父子进程分别写同一映射的可见性测试，运行 `make grade-mmap`。
-- [ ] 审计 `exec()` 与 mmap 清理的两阶段语义。
-  - 当前状态：`kernel/exec.c` 在提交新地址空间前调用 `mmap_cleanup(p, 0)`；原 TODO 指出失败路径可能已经部分拆掉旧映射。
-  - 剩余工作：拆成可失败的写回阶段和不可失败的拆映射阶段，避免 `exec()` 失败后旧地址空间处于部分清理状态。
-  - 涉及模块：`kernel/exec.c`、`kernel/proc.c`。
-  - 验证方式：构造 `MAP_SHARED` 脏页后执行失败 `exec()` 的测试，确认进程仍可继续使用旧映射。
+  - 明确 `MAP_PRIVATE` 快照/COW 和 `MAP_SHARED` 父子可见性。
+- [ ] 修正 exec 与 mmap 清理的两阶段语义。
+  - 失败的 `exec()` 不得提前破坏旧地址空间或丢失映射状态。
+- [ ] 支持 VMA hole reuse。
+  - 反复 mmap/munmap 不应只增加 `mmap_top` 并最终耗尽地址区间。
 
-### 3.3 测试分层继续完善
+P1 完成标准：新增边界测试通过，且 `make test-mmap`、`make test-cow`、`make test-fs`、`make test-smoke` 无回归。
 
-- [x] 完成 Go runner 与 Python smoke 的默认入口切换基线。
-  - 当前状态：`make test-smoke` 已作为默认轻量入口（40 case），`make smoke` / `make smoke-py` 保留为 legacy 对照。
-  - 剩余工作：继续观察默认 smoke 的稳定性，记录覆盖差异。
-  - 验证方式：`make test-smoke`、`make smoke-py`。
-- [x] 补齐 Go runner 运行模式（Phase 2.5）。
-  - 当前状态：`QemuModeNormal`、`QemuModeNetForward`、`HostOnly` 均已实现；`ph` / `barrier` 以 HostOnly 模式接入；per-subsystem suites 已接入 9 个。
-  - 验证方式：`make test-thread`（含 HostOnly）、`make test-net`（含 NetForward）。
-- [x] 拆分 net smoke 与外部 DNS 测试。
-  - 当前状态：本地 UDP echo 路径保留在默认 smoke；DNS 检查已拆为非默认 case，可按 `--tags dns` 单独运行。
-  - 验证方式：本地 net smoke 不依赖公网 DNS，DNS case 仍可单独运行。
-- [x] 拆分 usertests 与重型测试分层（Phase 4）。
-  - 当前状态：19 个轻量 usertests subtest 已接入 smoke；`usertests-full`、`bigfile`、`sbrkmuch` 标为 heavy；无显式 `--tags` 时所有 suite 默认跳过 heavy；新增 `make test-usertests`、`make test-heavy`。
-  - 验证方式：`make test-smoke` 不跑 heavy，`make test-heavy` 仅跑 heavy。
-- [x] 增加日常快速验证路径（`make test-quick`）。
-  - 当前状态：8 个低耗时 case，覆盖 util、syscall、pgtbl、cow、fs、mmap。
-  - 验证方式：`make test-quick` 稳定通过且明显快于 `make test-smoke`。
-- [x] 细化 `make regression` 覆盖范围。
-- [ ] 评估 per-suite QEMU 复用。
-  - 当前状态：Go runner 默认 per-case QEMU，隔离性强但启动成本更高。
-  - 剩余工作：仅对明确无状态污染的轻量 case 评估 per-suite QEMU 复用。
-  - 涉及模块：`tests/host/internal/testrunner/runner.go`。
+## P2：内核可观测性与文件系统
 
-## 4. 待完成内容
+这一阶段只选择一个有量化结果的专题，不同时铺开。
 
-### 4.1 短期任务
-
-- [ ] 补充 mmap 边界测试。
-  - 要做什么：为参数校验、跨页 `copyin` / `copyout`、`copyinstr`、权限错误、非页对齐 offset、非法 flags 增加用户态测试。
-  - 涉及模块：`user/mmaptest.c`、`kernel/sysfile.c`、`kernel/vm.c`。
-  - 为什么要做：当前已有 `read(fd, fresh_mmap_addr, n)` 覆盖，但跨页、字符串和错误权限路径仍容易回归。
-  - 如何验证：`make grade-mmap`，并确认新增 case 在失败时输出明确原因。
-- [ ] 补充 `copyin` / `copyout` lazy fault-in 审计说明。
-  - 要做什么：记录 `kernel/vm.c` 中用户地址访问触发 mmap lazy fault-in 的入口和限制。
-  - 涉及模块：`kernel/vm.c`、`docs/kernel-lifetime-notes.md` 或新增 VM 文档。
-  - 为什么要做：mmap 页可能在 syscall buffer 中首次触发 fault，调用路径不如普通 usertrap 直观。
-  - 如何验证：文档列出的入口能在代码中逐一定位，并有对应测试或待测项。
-- [ ] 加强 buffer cache pin/unpin 防御检查。
-  - 要做什么：在 `bunpin()` 和 `brelse()` 中考虑增加 `refcnt < 1` 的 panic 检查。
-  - 涉及模块：`kernel/bio.c`、`kernel/buf.h`、`kernel/log.c`。
-  - 为什么要做：提前暴露日志层 pin/unpin 不匹配或重复释放问题。
-  - 如何验证：`make grade-fs`、`make grade-lock`、`make grade-mmap`。
-- [ ] 增加日志头边界检查。
-  - 要做什么：在 `read_head()` 读取磁盘日志头后检查 `lh->n < 0 || lh->n > LOGSIZE || lh->n > log.size - 1`。
-  - 涉及模块：`kernel/log.c`、`kernel/param.h`。
-  - 为什么要做：避免损坏日志头导致恢复路径越界访问。
-  - 如何验证：正常路径运行 `make grade-fs`；损坏镜像测试需要单独设计，可先通过代码审查确认边界。
 - [ ] 建立 `docs/kernel-lifetime-notes.md`。
-  - 要做什么：记录 `struct file` refcount、inode lock/ref、COW page refcount、VMA file refs、bcache buf refcnt/pin 的所有权关系。
-  - 涉及模块：`kernel/file.c`、`kernel/fs.c`、`kernel/proc.c`、`kernel/vm.c`、`kernel/bio.c`、`kernel/log.c`。
-  - 为什么要做：当前多个 lab 的生命周期规则交叉，后续重构前需要明确不变量。
-  - 如何验证：文档中的每条所有权转移能对应到具体函数和释放路径。
-
-### 4.2 中期任务
-
-- [x] 规范化当前 ulibc / 用户态支持层。
-  - 当前状态：已完成 `crt0` 启动路径、ulibc 模块化拆分（`ustring.c`/`ufile.c`/`ugetpid.c`）、`usys.py` 替换 `usys.pl`、头文件拆为 `ulib.h`+`usyscall.h`+`user.h`。
-  - 验证方式：`make build`、`make test-quick`、`make test-smoke`。
-- [x] 补齐 picolibc P0/P1 OS glue 并跑通基础 PoC（替代原 newlib 计划）。
-  - 当前状态：`user/pico/` 目录已建立独立 picolibc 链路，通过 `PICOLIBC_EXPERIMENT=1` 门控；`picohello` 已验证 `printf`/`malloc`/`exit`；`picoio` 已验证 POSIX fd API；`picostdio` 已验证基础 stdio 文件 I/O；`picoseek` 已验证 file-position API；`picodup2` 已验证 fd 重定向；`picosys` 已验证简单已有 xv6 syscall glue；`picocat` 已验证 cat 风格文件输出路径；`picoinit` 已验证 constructor/destructor；`picoecho` / `picosleep` 已验证简单程序迁移前置链路；`picotime` 已验证 time/entropy/errno PoC；`_pico_echo` / `_pico_sleep` 已验证真实源码迁移链路；`make test-picolibc` 已接入。详见 `docs/picolibc.md`。
-  - 后续工作：收紧完整 errno 语义，再开始迁移 `wc` / `grep` / `ls` 这类简单 native 程序。
-- [ ] 重构 VMA 管理模块。
-  - 要做什么：将 VMA 查找、分配、拆分、写回、清理逻辑从 `kernel/proc.c` 中拆出，形成更清晰的模块边界。
-  - 涉及模块：`kernel/proc.c`、`kernel/proc.h`、可能新增 `kernel/mmap.c` 或 `kernel/vma.c`、`Makefile`。
-  - 为什么要做：降低 `proc.c` 的职责密度，方便单独审计 mmap 生命周期。
-  - 如何验证：`make grade-mmap`、`make grade-cow`、`make smoke`。
-- [ ] 拆分 `usertests` 覆盖层级。
-  - 要做什么：将 `user/usertests.c` 中耗时不同的测试按 proc、vm、fs、syscall、lock 分组，或者提供更明确的 Makefile/脚本过滤入口。
-  - 涉及模块：`user/usertests.c`、`graders/`、`Makefile`、`README.md`。
-  - 为什么要做：`FSSIZE=200000` 和 `MAXFILE` 放大后，完整 `usertests` 不适合作为默认日常检查。
-  - 如何验证：新增入口能分别运行轻量组和完整组，输出稳定且 README 说明清楚。
-- [ ] 优化文件系统大文件测试成本。
-  - 要做什么：区分基础 FS 正确性和 double-indirect 最大文件测试；避免所有默认回归都隐式继承 `bigfile` 级别写盘成本。
-  - 涉及模块：`user/bigfile.c`、`user/usertests.c`、`graders/grade-lab-fs`、`README.md`。
-  - 为什么要做：保留 `bigfile` 的课程覆盖，同时降低日常回归耗时。
-  - 如何验证：`make smoke` 不跑重型项，`make grade-fs` / `make grade-all-heavy` 仍覆盖 `bigfile`。
-- [ ] 增加日志系统可观测性。
-  - 要做什么：为 `kernel/log.c` 增加 commit 次数、logged blocks、absorbed blocks、等待原因、install blocks 等统计，并通过现有 `sysinfo` 或新接口暴露。
-  - 涉及模块：`kernel/log.c`、`kernel/sysproc.c`、`kernel/sysinfo.h`、`user/sysinfotest.c` 或新增用户态工具。
-  - 为什么要做：为后续 WAL 提交路径优化提供可量化指标。
-  - 如何验证：新增用户态测试读取统计并确认事务路径会更新计数。
-
-### 4.3 长期优化
-
-- [ ] 优化 buffer cache 淘汰策略。
-  - 要做什么：评估并实现 old / young 双分区链表，替代当前 `timestamp` + 全桶扫描的近似 LRU。
-  - 涉及模块：`kernel/bio.c`、`kernel/buf.h`、`kernel/stats.c`、`user/bcachetest.c`。
-  - 为什么要做：降低 miss 时全桶扫描成本，并减轻一次性顺序扫描对热块的污染。
-  - 如何验证：`make grade-lock`、`make grade-fs`、`make grade-mmap`，并比较 `bcachetest` 竞争统计。
+  - 记录 file/inode/VMA/COW page/buffer cache 的引用和所有权转移。
+- [ ] 为 WAL 增加统计。
+  - 统计 commit、logged/absorbed/installed blocks 和等待原因，为优化提供基线。
 - [ ] 优化 WAL 正常提交路径。
-  - 要做什么：将 `install_trans()` 拆为 recovery 路径和 normal commit 路径；正常提交直接写回 pinned home buffer 并 `bunpin()`，恢复路径继续从日志区 replay。
-  - 涉及模块：`kernel/log.c`、`kernel/bio.c`。
-  - 为什么要做：当前正常提交在 `write_head()` 后仍从日志区读回并拷贝到 home block，存在可避免的 buffer cache 查找和 1024B 拷贝。
-  - 如何验证：`make grade-fs`、`make grade-mmap`、`make grade-lock`，并通过日志统计确认 install blocks 或反向读次数下降。
-- [ ] 评估内存日志缓存 pinned buffer 指针。
-  - 要做什么：在 `struct log` 中加入纯内存 `struct buf *bufs[LOGSIZE]`，减少 `write_log()` 和 normal install 中按块号重新 `bread()` 的查找。
-  - 涉及模块：`kernel/log.c`、`kernel/bio.c`。
-  - 为什么要做：在 WAL 正常提交路径优化稳定后进一步降低 cache 查找开销。
-  - 如何验证：先完成日志统计，再对比优化前后 commit 路径的统计变化。
-- [ ] 建立 CI 或本地自动化回归约定。
-  - 要做什么：将 `git diff --check`、`make build image`、`make smoke` 和若干定向 grader 组织成可复用脚本或 CI job。
-  - 涉及模块：`Makefile`、可能新增 `.github/workflows/` 或本地脚本、`README.md`。
-  - 为什么要做：降低阶段性集成时漏跑关键验证的概率。
-  - 如何验证：在干净 checkout 上执行自动化入口并记录耗时。
-- [ ] 归档 Python grader 并完成测试入口去评分化。
-  - 要做什么：在 Go runner 覆盖 smoke、per-subsystem 和 heavy suite 后，将 `gradelib.py` 与 `graders/grade-lab-*` 作为 legacy 对照归档，默认入口不再使用评分语义。
-  - 涉及模块：`gradelib.py`、`graders/`、`Makefile`、`README.md`、`docs/test-migrate.md`。
-  - 为什么要做：`dev/all` 已经不是课程 hand-in 分支，长期入口应是 `test-*` 而不是 `grade-*`。
-  - 如何验证：`make test-smoke`、`make test-regression`、`make test-heavy` 可覆盖日常与阶段性回归，README 不再推荐 `grade-*` 作为主要入口。
+  - 区分 normal commit 与 recovery replay，减少不必要的日志区读回和 block copy。
+- [ ] 评估 buffer cache 淘汰策略。
+  - 在现有 bucketed cache 基础上比较全桶近似 LRU 与分代/冷热策略。
 
-## 5. 测试与验证计划
+涉及性能优化时必须先记录基线 workload、统计口径和正确性测试，再实现优化。
 
-### 5.1 提交前基础检查
+## P3：项目交付质量
 
-- [ ] 运行 `git diff --check`。
-- [ ] 运行 `make build image`。
-- [ ] 如果修改 `.c` 或 `.h` 文件，运行 `clang-format -i` 处理相关文件。
-- [ ] 如果修改头文件，运行 `clangd --check=<file>`，确认头文件自包含和类型依赖正确。
+- [ ] 建立 CI。
+  - 第一阶段运行 `go test ./...`、`make build` 和格式检查。
+  - 第二阶段加入 `make test-quick`，保存失败日志。
+  - heavy suite 只做手动或定时运行。
+- [ ] 为 VM/mmap 专题增加设计文档。
+  - 记录问题、旧路径、设计不变量、失败回滚和测试矩阵。
+- [ ] 准备可复现演示。
+  - 展示 QEMU 启动、核心测试、Picolibc 工具和失败日志。
+- [ ] 阶段性运行完整回归并记录结果。
+  - 至少包括 `make test-smoke`、相关 subsystem suite 和一次 heavy/legacy 对照。
 
-### 5.2 日常轻量回归
+## Picolibc 收束线
 
-- [ ] 运行 `make test-quick`（最快，8 case）。
-- [ ] 运行 `make test-smoke`（提交前，40 case）。
-  - 覆盖内容：`util`、`syscall`、`net`、`pgtbl`、`traps`、`thread`、`cow`、`fs`、`mmap`、19 个 usertests subtest。
-  - 适用场景：文档、Makefile、用户态工具、小范围内核改动。
-- [ ] 运行与改动模块对应的定向测试。
-  - VM / COW：`make test-cow`。
-  - mmap：`make test-mmap`。
-  - traps / alarm：`make test-traps`。
-  - FS：`make test-fs`。
-  - lock / bcache：`make test-lock`。
-  - thread：`make test-thread`。
+Picolibc 当前作为用户态兼容性和内核 syscall 的验证平台，不再优先追求完整 POSIX。
 
-### 5.3 中等与重型回归
+- [ ] 实现简版 `picols`：支持无参数、目录参数和普通文件参数。
+- [ ] 在 VM 主线完成后再评估 `lstat/readlink` 和 `picols -l`。
+- [ ] 暂缓 `rename`、`getcwd`、完整 `fcntl`、`scandir` 和 `pbox`。
 
-- [ ] 运行 `make regression`。
-  - 适用场景：涉及 VM、COW、mmap 或 trap 分派的改动。
-- [ ] 运行 `make grade-all-heavy` 或 `make grade-all`。
-  - 适用场景：阶段性合并、重构完成、缓存或日志路径变更。
-  - 注意事项：包含 `bigfile`、完整 fs/lock 压力项和多次 QEMU 启动，耗时明显高于 `make smoke`。
+## 每次提交的验证
 
-## 6. 可能的后续方向
+- [ ] `git diff --check`
+- [ ] 对修改过的 C/头文件运行 `clang-format -i`
+- [ ] 对修改过的头文件运行 `clangd --check=<file>`
+- [ ] 运行覆盖改动范围的最小 suite
+- [ ] 内核机制改动至少运行 `make test-quick` 和对应 subsystem suite
+- [ ] 阶段性内核提交运行 `make test-smoke`
 
-- 保持 `dev/all` 作为集成分支，避免在课程参考分支上直接开发。
-- 保持文档和 Makefile 入口同步：新增测试入口或移动脚本目录后，同步更新 `README.md`、`AGENTS.md`、`docs/lab-migration-plan.md` 和本文件。
-- 优先处理能降低后续重构风险的任务：VM fault path 拆分、mmap 生命周期审计、kernel lifetime 文档、测试分层。
-- 暂不追求完整 POSIX 兼容、生产级内核能力或磁盘格式大改；后续目标应保持在 xv6 教学 OS 和已整合 lab 的合理范围内。
+## 推荐执行顺序
+
+1. VM fault 基线测试。
+2. page-fault dispatcher 与 COW helper。
+3. VMA 模块边界整理。
+4. mmap fork、munmap、exec 生命周期语义。
+5. CI、设计文档和演示。
+6. 从 WAL 或 buffer cache 中选择一个可量化专题。
+
+完成第 4 步后，项目将形成一条完整的内核成果链：问题审计、机制设计、实现重构、边界测试和回归验证，而不只是 lab 功能集合。
