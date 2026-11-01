@@ -168,6 +168,8 @@ static int setup_user_stack(pagetable_t pagetable, char **argv, uint64 sz, uint6
     if ((new_sz = uvmalloc(pagetable, sz, sz + 2 * PGSIZE)) == 0)
         return -1;
     sz = new_sz;
+    // 后续压入参数可能失败，立即同步大小，确保调用者能释放栈和 guard page。
+    *newsz = sz;
     uvmclear(pagetable, sz - 2 * PGSIZE); // 低位页废除 PTE_U，变成 guard page
     sp = sz;
     stackbase = sp - PGSIZE; // 栈可用区间：[stackbase, sp)
@@ -194,7 +196,6 @@ static int setup_user_stack(pagetable_t pagetable, char **argv, uint64 sz, uint6
     if (copyout(pagetable, sp, (char *)ustack, (argc + 1) * sizeof(uint64)) < 0)
         return -1;
 
-    *newsz = sz;
     *sp_out = sp;
     *argc_out = argc;
     return 0;
